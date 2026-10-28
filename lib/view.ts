@@ -8,6 +8,7 @@ export type PickView = {
   selection: string;
   confidence: "alta" | "media";
   sicura: boolean;
+  probability: number | null;
   probabilityLabel: string;
   reason: string;
   safetyNote: string;

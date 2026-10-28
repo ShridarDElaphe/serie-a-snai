@@ -36,6 +36,11 @@ export function formatNum(n: number, digits = 1): string {
   return n.toFixed(digits).replace(".", ",");
 }
 
+export function formatEuro(amount: number): string {
+  const sign = amount < 0 ? "−" : "";
+  return `${sign}€${Math.abs(amount).toFixed(2).replace(".", ",")}`;
+}
+
 export function formatInt(n: number): string {
   return new Intl.NumberFormat("it-IT").format(n);
 }

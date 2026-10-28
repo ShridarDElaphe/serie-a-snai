@@ -11,7 +11,7 @@
     "start": "next start",
     "lint": "eslint",
     "refresh": "tsx scripts/refresh.ts",
-    "test:model": "tsx lib/model/engine.test.ts && tsx lib/ingest/espn.test.ts"
+    "test:model": "tsx lib/model/engine.test.ts && tsx lib/worth.test.ts && tsx lib/combo.test.ts && tsx lib/ingest/espn.test.ts"
   },
   "dependencies": {
     "next": "15.5.28",

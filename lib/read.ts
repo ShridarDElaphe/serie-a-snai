@@ -145,6 +145,7 @@ function toPick(row: ProposalRow): PickView {
     selection: row.selection,
     confidence: row.confidence,
     sicura: row.sicura === 1,
+    probability: row.probability,
     probabilityLabel: row.probability == null ? DATO_ASSENTE : formatPct(row.probability),
     reason: row.reason,
     safetyNote: row.safety_note,
@@ -380,6 +381,7 @@ export function readPartita(id: string): MatchPayload {
   const blocks = [
     ["doppia_chance", "Doppia chance"],
     ["multigol", "Multigol"],
+    ["combo", "Doppia"],
     ["marcatore", "Marcatore"],
     ["ammonizioni", "Ammonizioni"],
   ].map(([market, label]) => ({
@@ -471,7 +473,7 @@ export function readPartita(id: string): MatchPayload {
 export function readStorico(): StoricoPayload {
   const state = source();
   const rows = all<ProposalRow>(`${PICK_SQL} ORDER BY m.kickoff DESC, p.sort_key DESC`).map(toPick);
-  const markets = ["doppia_chance", "multigol", "marcatore", "ammonizioni"];
+  const markets = ["doppia_chance", "multigol", "combo", "marcatore", "ammonizioni"];
   const rates = markets.map((market) => {
     const mine = rows.filter((row) => row.market === market);
     const hits = mine.filter((row) => row.outcome === "hit").length;

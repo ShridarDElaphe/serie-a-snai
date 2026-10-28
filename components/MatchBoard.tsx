@@ -106,6 +106,9 @@ export function MatchBoard({ id }: { id: string }) {
       {data.markets.map((market) => (
         <section key={market.id} className="block">
           <h2>{market.label}</h2>
+          {market.id === "combo" ? (
+            <p className="hint">Due gambe sulla stessa griglia di punteggi: doppia chance, multigol, gol/no gol, under/over. La quota della doppia non è nel flusso, scrivila tu. Se rende pochi centesimi, non conviene.</p>
+          ) : null}
           {market.note ? <p className="hint">{market.note}</p> : null}
           {market.picks.length ? (
             <div className="slip">

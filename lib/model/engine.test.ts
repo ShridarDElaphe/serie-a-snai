@@ -65,6 +65,17 @@ assert.equal(oneX?.confidence, "alta");
 assert.equal(oneX?.sicura, true);
 assert.ok((oneX?.probability ?? 0) >= 0.78);
 assert.ok(strong.proposals.some((pick) => pick.market === "multigol"));
+const combos = strong.proposals.filter((pick) => pick.market === "combo");
+assert.ok(combos.length > 0, "la favorita deve produrre almeno una doppia");
+assert.ok(combos.some((pick) => pick.selection.startsWith("Doppia: 1X + ")));
+assert.ok(
+  combos.some((pick) => pick.selection.includes("Multigol") || pick.selection.includes("Gol") || pick.selection.includes("Over") || pick.selection.includes("Under")),
+);
+for (const combo of combos) {
+  assert.equal(combo.sicura, false);
+  assert.ok((combo.probability ?? 0) >= 0.4 && (combo.probability ?? 1) < 1);
+}
+assert.equal(combos.some((pick) => pick.selection.startsWith("Over")), false);
 assert.ok(strong.notes.some((note) => note.includes("dato assente")));
 assert.equal(strong.proposals.some((pick) => pick.market === "marcatore"), false);
 assert.equal(

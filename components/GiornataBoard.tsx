@@ -1,12 +1,15 @@
 "use client";
 
 import Link from "next/link";
+import { judgeStake } from "@/lib/worth";
+import type { GiornataPayload, PickView } from "@/lib/view";
 import { PickCard } from "./PickCard";
 import { usePoll } from "./usePoll";
-import type { GiornataPayload } from "@/lib/view";
+import { useQuotes } from "./useQuotes";
 
 export function GiornataBoard() {
   const { data, error } = usePoll<GiornataPayload>("/api/giornata");
+  const quotes = useQuotes();
   if (!data) {
     return (
       <section className="page">
@@ -16,15 +19,27 @@ export function GiornataBoard() {
       </section>
     );
   }
-  const total = data.slips.reduce((sum, slip) => sum + slip.picks.length, 0);
+  const split = (picks: PickView[]) => {
+    const stake: PickView[] = [];
+    const held: PickView[] = [];
+    for (const pick of picks) {
+      if (judgeStake(pick.probability, quotes[pick.id], pick.confidence).conviene) stake.push(pick);
+      else held.push(pick);
+    }
+    return { stake, held };
+  };
+  const stakeCount = data.slips.reduce((sum, slip) => sum + split(slip.picks).stake.length, 0);
+  const altaCount = data.slips.reduce((sum, slip) => sum + slip.picks.length, 0);
   return (
     <section className="page">
       <p className={`banner ${data.sample ? "sample" : ""}`}>{data.banner}</p>
       <p className="kicker">Aggiornato {data.updatedLabel} · {data.phase}</p>
-      <h1>Le proposte più prudenti</h1>
+      <h1>Cosa conviene puntare</h1>
       <p className="lede">
-        Solo confidenza alta, dalla più sicura alla meno sicura, per costruire una schedina cauta.
-        {total === 0 ? " In questa finestra nessuna proposta supera la soglia." : ` ${total} proposte, sulla giornata di oggi e sulla successiva.`}
+        La probabilità alta non basta, né su una singola né su una doppia (doppia chance con multigol, gol o under/over). Su €1 e su €2 l’utile è (quota − 1) × posta: se sono pochi centesimi, o se il valore atteso è negativo, la giocata non entra nell’elenco.
+        {altaCount === 0
+          ? " In questa finestra nessuna proposta supera la soglia di probabilità."
+          : ` ${altaCount} proposte alte, ${stakeCount} da puntare con la quota che hai scritto.`}
       </p>
       <p className="lede">{data.seasonLabel}</p>
       {data.slips.map((slip) => (
@@ -34,11 +49,28 @@ export function GiornataBoard() {
             <p>{slip.note}</p>
           </header>
           {slip.picks.length ? (
-            <div className="slip">
-              {slip.picks.map((pick, index) => (
-                <PickCard key={pick.id} pick={pick} index={index} />
-              ))}
-            </div>
+            <>
+              <h3 className="slip-label">Da puntare</h3>
+              {split(slip.picks).stake.length ? (
+                <div className="slip">
+                  {split(slip.picks).stake.map((pick, index) => (
+                    <PickCard key={pick.id} pick={pick} index={index} />
+                  ))}
+                </div>
+              ) : (
+                <p className="empty">Nessuna. Senza una quota SNAI che regge il conto non entra in questo elenco.</p>
+              )}
+              {split(slip.picks).held.length ? (
+                <>
+                  <h3 className="slip-label">Non da puntare</h3>
+                  <div className="slip">
+                    {split(slip.picks).held.map((pick, index) => (
+                      <PickCard key={pick.id} pick={pick} index={index} />
+                    ))}
+                  </div>
+                </>
+              ) : null}
+            </>
           ) : (
             <p className="empty">Nessuna proposta ad alta confidenza. Sotto soglia, o con un segnale contrario, resta nella pagina della partita oppure non viene proprio suggerita.</p>
           )}

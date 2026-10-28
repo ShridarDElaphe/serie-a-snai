@@ -19,9 +19,10 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         {children}
         <footer className="site-footer">
           <p>
-            <strong>Nessuna proposta è una vincita sicura.</strong> «Sicura» significa solo che i segnali del modello concordano.
-            Le quote SNAI non sono lette qui: una giocata più prudente è, di solito, una quota più bassa. Decidi tu.
-            Il gioco è vietato ai minori e può creare dipendenza.
+            <strong>Nessuna proposta è una vincita sicura.</strong> Una probabilità alta non basta.
+            La quota SNAI non è nel flusso dati: la scrivi tu. Finché manca, la giocata non è conveniente.
+            Se l’utile su €1 è sotto 10 centesimi, come una quota 1,08, o se il valore atteso è negativo, esce dall’elenco da puntare.
+            Decidi tu. Il gioco è vietato ai minori e può creare dipendenza.
           </p>
         </footer>
       </body>

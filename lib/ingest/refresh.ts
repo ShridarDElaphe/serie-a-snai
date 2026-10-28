@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { all, get, metaGet, metaSet, run, transaction, wipeDatabase } from "../db";
 import { assignMatchdays, focusMatchdays } from "../matchday";
 import { cardSampleFromCounts, decide } from "../model/engine";
+import { comboHits } from "../combo";
 import { lastName, mentionsAlias } from "../teams";
 import type {
   DecideInput,
@@ -773,6 +774,11 @@ function judge(proposal: {
       (proposal.selection.startsWith("1X") && result !== "2") ||
       (proposal.selection.startsWith("X2") && result !== "1") ||
       (proposal.selection.startsWith("12") && result !== "X");
+    return { outcome: hit ? "hit" : "miss", note: `Risultato ${home}-${away}` };
+  }
+  if (proposal.market === "combo") {
+    const hit = comboHits(proposal.selection, home, away);
+    if (hit == null) return { outcome: "non_verificabile", note: "Doppia illeggibile" };
     return { outcome: hit ? "hit" : "miss", note: `Risultato ${home}-${away}` };
   }
   if (proposal.market === "multigol") {

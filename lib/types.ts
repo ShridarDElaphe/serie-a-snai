@@ -1,4 +1,4 @@
-export type Market = "doppia_chance" | "multigol" | "marcatore" | "ammonizioni";
+export type Market = "doppia_chance" | "multigol" | "marcatore" | "ammonizioni" | "combo";
 export type Confidence = "alta" | "media";
 export type Origin = "live" | "ricostruzione";
 export type Outcome = "pending" | "hit" | "miss" | "non_verificabile" | "void";

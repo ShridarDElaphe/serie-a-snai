@@ -9,6 +9,7 @@ const FILTERS = [
   { id: "tutti", label: "Tutti" },
   { id: "doppia_chance", label: "Doppia chance" },
   { id: "multigol", label: "Multigol" },
+  { id: "combo", label: "Doppie" },
   { id: "marcatore", label: "Marcatori" },
   { id: "ammonizioni", label: "Ammonizioni" },
 ];

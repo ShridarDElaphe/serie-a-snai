@@ -72,6 +72,23 @@ export function pickBand(mu: number): { id: string; low: number; high: number; m
   return contained[0];
 }
 
+type ScorePred = (home: number, away: number) => boolean;
+
+/** Probabilità congiunta sulla stessa griglia di punteggi, non il prodotto di due eventi indipendenti. */
+export function scoreJoint(lambdaHome: number, lambdaAway: number, preds: ScorePred[], max = 8): number {
+  let hit = 0;
+  let sum = 0;
+  for (let home = 0; home <= max; home += 1) {
+    const ph = poissonPmf(home, lambdaHome);
+    for (let away = 0; away <= max; away += 1) {
+      const p = ph * poissonPmf(away, lambdaAway);
+      sum += p;
+      if (preds.every((pred) => pred(home, away))) hit += p;
+    }
+  }
+  return sum ? hit / sum : 0;
+}
+
 export function bandProb(total: number[], low: number, high: number): number {
   let p = 0;
   for (let goals = low; goals <= high && goals < total.length; goals += 1) p += total[goals] ?? 0;
@@ -227,15 +244,12 @@ function signalWord(value: boolean | null): SignalValue {
 
 function safetyNote(probability: number | null, alta: boolean): string {
   if (probability == null) {
-    const head = alta
-      ? "Più prudente tra le giocate dello stesso tipo: i segnali personali sono larghi e la quota attesa di solito resta contenuta."
-      : "Meno prudente: i segnali superano la soglia ma sono più stretti, quindi la quota attesa è un po’ più alta.";
-    return `${head} La probabilità numerica è ${DATO_ASSENTE}: non viene inventata. Non è una vincita garantita.`;
+    return `I segnali ${alta ? "sono larghi" : "superano la soglia ma sono più stretti"}. La probabilità numerica è ${DATO_ASSENTE}: non viene inventata. Senza quel numero e senza la quota SNAI non dico se conviene puntare.`;
   }
   const high = percent(probability) >= THRESHOLDS.dcAltaPercent;
   const head = high
-    ? "Più prudente: probabilità stimata alta, quindi la quota attesa su SNAI è di solito modesta."
-    : "Meno prudente: la probabilità resta sopra la soglia, ma il margine è più stretto e la quota attesa un po’ più alta.";
+    ? "Probabilità stimata alta. Non basta per puntare: la quota SNAI va scritta a mano, e pochi centesimi di utile non pagano il rischio di perdere la posta."
+    : "Probabilità sopra la soglia, con un margine più stretto. La quota SNAI va scritta a mano prima di chiamarla conveniente.";
   return `${head} Non è una vincita garantita: decidi tu.`;
 }
 
@@ -501,6 +515,8 @@ export function decide(input: DecideInput): DecideResult {
       }
     }
 
+    proposals.push(...comboDrafts(input, proposals, lambdaHome, lambdaAway, formHome, formAway));
+
     const squad = squadPicks(input, formHome, formAway, lambdaHome, lambdaAway);
     proposals.push(...squad.proposals);
     notes.push(...squad.notes);
@@ -534,6 +550,105 @@ export function decide(input: DecideInput): DecideResult {
     },
     input,
   );
+}
+
+type ComboLeg = {
+  family: "dc" | "multigol" | "gol" | "uo";
+  token: string;
+  marginal: number;
+  pred: ScorePred;
+};
+
+function comboDrafts(
+  input: DecideInput,
+  proposals: ProposalDraft[],
+  lambdaHome: number,
+  lambdaAway: number,
+  formHome: string,
+  formAway: string,
+): ProposalDraft[] {
+  const legs: ComboLeg[] = [];
+  for (const draft of proposals) {
+    if (draft.market === "doppia_chance" && draft.probability != null) {
+      const side: Side = draft.selection.startsWith("1X") ? "1X" : draft.selection.startsWith("X2") ? "X2" : "12";
+      const pred: ScorePred = side === "1X" ? (home, away) => home >= away : side === "X2" ? (home, away) => away >= home : (home, away) => home !== away;
+      legs.push({ family: "dc", token: side, marginal: draft.probability, pred });
+    }
+    if (draft.market === "multigol" && draft.probability != null) {
+      const band = draft.selection.match(/(\d)-(\d)/);
+      if (!band) continue;
+      const low = Number(band[1]);
+      const high = Number(band[2]);
+      legs.push({
+        family: "multigol",
+        token: `Multigol ${low}-${high}`,
+        marginal: draft.probability,
+        pred: (home, away) => {
+          const total = home + away;
+          return total >= low && total <= high;
+        },
+      });
+    }
+  }
+  const gol = scoreJoint(lambdaHome, lambdaAway, [(home, away) => home > 0 && away > 0]);
+  const noGol = scoreJoint(lambdaHome, lambdaAway, [(home, away) => home === 0 || away === 0]);
+  const goalLeg = gol >= noGol
+    ? { token: "Gol", marginal: gol, pred: (home: number, away: number) => home > 0 && away > 0 }
+    : { token: "No gol", marginal: noGol, pred: (home: number, away: number) => home === 0 || away === 0 };
+  if (percent(goalLeg.marginal) >= THRESHOLDS.comboGoalMinPercent) {
+    legs.push({ family: "gol", ...goalLeg });
+  }
+  const lines = [1.5, 2.5, 3.5];
+  const ou = lines
+    .map((line) => {
+      const over = scoreJoint(lambdaHome, lambdaAway, [(home, away) => home + away > line]);
+      const under = scoreJoint(lambdaHome, lambdaAway, [(home, away) => home + away < line]);
+      const label = formatNum(line, 1);
+      return over >= under
+        ? { token: `Over ${label}`, marginal: over, pred: (home: number, away: number) => home + away > line }
+        : { token: `Under ${label}`, marginal: under, pred: (home: number, away: number) => home + away < line };
+    })
+    .filter((leg) => percent(leg.marginal) >= THRESHOLDS.comboLegMinPercent)
+    .sort((a, b) => b.marginal - a.marginal)
+    .slice(0, 2);
+  for (const leg of ou) legs.push({ family: "uo", ...leg });
+
+  const drafts: ProposalDraft[] = [];
+  for (let i = 0; i < legs.length; i += 1) {
+    for (let j = i + 1; j < legs.length; j += 1) {
+      const left = legs[i];
+      const right = legs[j];
+      if (left.family === right.family) continue;
+      const joint = scoreJoint(lambdaHome, lambdaAway, [left.pred, right.pred]);
+      if (percent(joint) < THRESHOLDS.comboMinPercent) continue;
+      const alta = percent(joint) >= THRESHOLDS.comboAltaPercent;
+      drafts.push({
+        market: "combo",
+        selection: `Doppia: ${left.token} + ${right.token}`,
+        confidence: alta ? "alta" : "media",
+        sicura: false,
+        probability: joint,
+        sortKey: joint,
+        reason: `Doppia su ${input.homeName}–${input.awayName}. La probabilità è quella dei punteggi che soddisfano entrambe le gambe, non il prodotto di due eventi staccati. ${left.token} da sola ${formatPct(left.marginal)}, ${right.token} da sola ${formatPct(right.marginal)}, insieme ${formatPct(joint)}. La quota SNAI della doppia non è nel flusso: va scritta a mano. Senza quella quota non è conveniente.`,
+        safetyNote: safetyNote(joint, alta),
+        signals: {
+          gamba1: left.token,
+          gamba2: right.token,
+          congiunta: percent(joint),
+          probabilita: percent(joint),
+        },
+        formHome,
+        formAway,
+      });
+    }
+  }
+  drafts.sort((a, b) => b.sortKey - a.sortKey);
+  return drafts.slice(0, 12).map((draft, index) => {
+    if (index >= 4 || (draft.probability ?? 0) < THRESHOLDS.comboAltaPercent / 100) {
+      return { ...draft, confidence: "media" as const };
+    }
+    return draft;
+  });
 }
 
 function squadPicks(
@@ -750,7 +865,7 @@ function applyNews(result: DecideResult, input: DecideInput): DecideResult {
         (player.goals ?? 0) >= THRESHOLDS.scorerAltaGoals &&
         playerNamedInShock(text, player.name),
     );
-    if (injuredStar && next && (next.market === "doppia_chance" || next.market === "multigol")) {
+    if (injuredStar && next && (next.market === "doppia_chance" || next.market === "multigol" || next.market === "combo")) {
       next = downgrade(next, `${injuredStar.name} è citato come indisponibile`);
       if (!next) {
         result.suppressed.push(`${draft.selection} nascosta: un marcatore stabile risulta indisponibile nell'ultima ora.`);

@@ -79,13 +79,23 @@ h3 { margin: 0.35rem 0; font-size: 1.35rem; }
   border-left: 6px solid var(--gold);
 }
 .pick.alta { border-left-color: var(--olive); }
+.pick.non-conviene { border-left-color: var(--terra); }
+.slip-label { margin: 1.3rem 0 0; font-size: 1.25rem; }
 .pick-top, .signals, .filters, .rates { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; }
 .ordinal { font-family: var(--font-display), Georgia, serif; font-size: 1.2rem; }
 .confidence, .sicura, .status, .prob {
   border-radius: 999px; padding: 0.1rem 0.55rem; font-size: 0.78rem; letter-spacing: 0.04em; text-transform: uppercase;
 }
-.confidence.alta, .sicura { background: var(--olive); color: #f4faf4; }
-.confidence.media { background: var(--terra-soft); color: var(--terra); }
+.confidence.alta, .verdict.ok { background: var(--olive); color: #f4faf4; }
+.confidence.media, .verdict.bad { background: var(--terra-soft); color: var(--terra); }
+.quota-row { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: end; margin: 0.7rem 0 0.2rem; }
+.quota-row label { display: grid; gap: 0.2rem; font-size: 0.78rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.quota-row input {
+  font: inherit; font-size: 1.05rem; letter-spacing: 0; text-transform: none; color: var(--ink);
+  width: 7.5rem; padding: 0.4rem 0.55rem; border: 1px solid var(--line); border-radius: 0.45rem; background: var(--paper);
+}
+.quota-row p, .worth { margin: 0.35rem 0; max-width: 40rem; }
+.worth strong { color: var(--ink); }
 .prob { margin-left: auto; background: var(--paper-deep); }
 .reason { margin: 0.55rem 0; }
 .form-line { font-variant-numeric: tabular-nums; letter-spacing: 0.04em; }
@@ -125,7 +135,7 @@ th { color: var(--muted); font-weight: 500; }
 .sources { padding-left: 1.1rem; }
 .rules { margin-top: 2rem; background: var(--card); border-radius: 0.9rem; padding: 0.8rem 1rem; border: 1px solid var(--line); }
 .rules summary { cursor: pointer; font-weight: 600; }
-.rates { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.7rem; margin: 1rem 0 1.2rem; }
+.rates { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.7rem; margin: 1rem 0 1.2rem; }
 .rates article { background: var(--card); border: 1px solid var(--line); border-radius: 0.9rem; padding: 0.8rem; }
 .rates strong { display: block; font-family: var(--font-display), Georgia, serif; font-size: 2rem; }
 .rates p { margin: 0.15rem 0; color: var(--muted); font-size: 0.88rem; }
