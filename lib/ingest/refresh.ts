@@ -876,21 +876,25 @@ async function pump() {
   }
 }
 
-let vercelChain: Promise<void> | null = null;
+const vercelGlobal = globalThis as unknown as { __margineVercelChain?: Promise<void> };
+
+function onVercel(): boolean {
+  return Boolean(process.env.VERCEL || process.env.VERCEL_ENV);
+}
 
 function vercelRefresh(mode: Mode): Promise<void> {
-  const next = (vercelChain ?? Promise.resolve()).then(() => refresh(mode));
-  vercelChain = next.catch((error) => {
+  const next = (vercelGlobal.__margineVercelChain ?? Promise.resolve()).then(() => refresh(mode));
+  vercelGlobal.__margineVercelChain = next.catch((error) => {
     console.error("[margine]", error instanceof Error ? error.message : error);
   });
-  return vercelChain;
+  return vercelGlobal.__margineVercelChain;
 }
 
 export function startRefreshLoop() {
   const loop = loopState();
   if (loop.started) return;
   loop.started = true;
-  if (process.env.VERCEL) {
+  if (onVercel()) {
     void vercelRefresh("startup");
     return;
   }
@@ -912,15 +916,16 @@ export function startRefreshLoop() {
 
 /** On Vercel the sqlite file is empty after every new instance, so the first request waits for a live refresh. */
 export async function ensureData(): Promise<void> {
-  if (!process.env.VERCEL) return;
-  const count = get<{ n: number }>("SELECT COUNT(*) AS n FROM matches")?.n ?? 0;
-  if (count === 0) {
-    if (!loopState().started) {
+  if (!onVercel()) return;
+  const count = () => get<{ n: number }>("SELECT COUNT(*) AS n FROM matches")?.n ?? 0;
+  if (count() === 0) {
+    if (!vercelGlobal.__margineVercelChain) {
       loopState().started = true;
       await vercelRefresh("startup");
-    } else if (vercelChain) {
-      await vercelChain;
+    } else {
+      await vercelGlobal.__margineVercelChain;
     }
+    if (count() === 0) await vercelRefresh("startup");
     return;
   }
   const updated = readSource().updatedAt;
