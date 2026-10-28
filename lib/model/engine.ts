@@ -1,3 +1,4 @@
+import { comboOverlaps } from "../combo";
 import { formatNum, formatPct, percent } from "../format";
 import { fold, lastName, mentionsAlias } from "../teams";
 import { DATO_ASSENTE, THRESHOLDS } from "../thresholds";
@@ -592,11 +593,12 @@ function comboDrafts(
   }
   const gol = scoreJoint(lambdaHome, lambdaAway, [(home, away) => home > 0 && away > 0]);
   const noGol = scoreJoint(lambdaHome, lambdaAway, [(home, away) => home === 0 || away === 0]);
-  const goalLeg = gol >= noGol
-    ? { token: "Gol", marginal: gol, pred: (home: number, away: number) => home > 0 && away > 0 }
-    : { token: "No gol", marginal: noGol, pred: (home: number, away: number) => home === 0 || away === 0 };
-  if (percent(goalLeg.marginal) >= THRESHOLDS.comboGoalMinPercent) {
-    legs.push({ family: "gol", ...goalLeg });
+  const goalSides = [
+    { token: "Gol", marginal: gol, pred: (home: number, away: number) => home > 0 && away > 0 },
+    { token: "No gol", marginal: noGol, pred: (home: number, away: number) => home === 0 || away === 0 },
+  ];
+  for (const leg of goalSides) {
+    if (percent(leg.marginal) >= THRESHOLDS.comboGoalMinPercent) legs.push({ family: "gol", ...leg });
   }
   const lines = [1.5, 2.5, 3.5];
   const ou = lines
@@ -619,6 +621,7 @@ function comboDrafts(
       const left = legs[i];
       const right = legs[j];
       if (left.family === right.family) continue;
+      if (comboOverlaps(left.token, right.token)) continue;
       const joint = scoreJoint(lambdaHome, lambdaAway, [left.pred, right.pred]);
       if (percent(joint) < THRESHOLDS.comboMinPercent) continue;
       const alta = percent(joint) >= THRESHOLDS.comboAltaPercent;

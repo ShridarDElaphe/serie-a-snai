@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { comboOverlaps } from "../combo";
 import { decide, pickBand, scoreProbs } from "./engine";
 import type { DecideInput, FinishedMatch, PlayerSeason } from "../types";
 
@@ -74,7 +75,11 @@ assert.ok(
 for (const combo of combos) {
   assert.equal(combo.sicura, false);
   assert.ok((combo.probability ?? 0) >= 0.4 && (combo.probability ?? 1) < 1);
+  const body = combo.selection.replace(/^Doppia:\s*/, "");
+  const [left, right] = body.split(" + ");
+  assert.equal(comboOverlaps(left ?? "", right ?? ""), false, combo.selection);
 }
+assert.equal(combos.some((pick) => /Multigol \d-\d \+ Under|Under [\d,]+ \+ Multigol/.test(pick.selection)), false);
 assert.equal(combos.some((pick) => pick.selection.startsWith("Over")), false);
 assert.ok(strong.notes.some((note) => note.includes("dato assente")));
 assert.equal(strong.proposals.some((pick) => pick.market === "marcatore"), false);

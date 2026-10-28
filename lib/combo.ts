@@ -1,3 +1,24 @@
+/**
+ * Due gambe che ripetono lo stesso conteggio di gol.
+ * Multigol con under è sempre così. Multigol con over lo è se la fascia sta già tutta sopra la linea.
+ * Gol implica over 1,5, perché entrambe le squadre a segno fanno almeno due gol.
+ */
+export function comboOverlaps(left: string, right: string): boolean {
+  const parts = [left, right];
+  const multigol = parts.find((part) => part.startsWith("Multigol "));
+  const total = parts.find((part) => part.startsWith("Over ") || part.startsWith("Under "));
+  if (multigol && total) {
+    if (total.startsWith("Under")) return true;
+    const band = multigol.match(/Multigol (\d)-(\d)/);
+    const line = total.match(/Over (\d),(\d)/);
+    if (!band || !line) return true;
+    const low = Number(band[1]);
+    const goals = Number(`${line[1]}.${line[2]}`);
+    return low > goals;
+  }
+  return parts.includes("Gol") && parts.some((part) => part.startsWith("Over 1,"));
+}
+
 /** Esito di una doppia già scritta, dal punteggio. Non calcola quote. */
 
 export function comboHits(selection: string, home: number, away: number): boolean | null {
