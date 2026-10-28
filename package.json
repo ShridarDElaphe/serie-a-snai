@@ -1,0 +1,33 @@
+{
+  "name": "serie-a-snai",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": "22.x"
+  },
+  "scripts": {
+    "dev": "next dev --turbopack -H 0.0.0.0 -p 3000",
+    "build": "next build --turbopack",
+    "start": "next start",
+    "lint": "eslint",
+    "refresh": "tsx scripts/refresh.ts",
+    "test:model": "tsx lib/model/engine.test.ts && tsx lib/ingest/espn.test.ts"
+  },
+  "dependencies": {
+    "next": "15.5.28",
+    "react": "19.1.0",
+    "react-dom": "19.1.0"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3",
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "15.5.28",
+    "tailwindcss": "^4",
+    "tsx": "^4.23.15",
+    "typescript": "^5"
+  }
+}
