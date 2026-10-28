@@ -81,6 +81,8 @@ h3 { margin: 0.35rem 0; font-size: 1.35rem; }
 .pick.alta { border-left-color: var(--olive); }
 .pick.non-conviene { border-left-color: var(--terra); }
 .slip-label { margin: 1.3rem 0 0; font-size: 1.25rem; }
+.match-group { margin-top: 1.6rem; }
+.match-group h3 { font-size: 1.55rem; }
 .pick-top, .signals, .filters, .rates { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; }
 .ordinal { font-family: var(--font-display), Georgia, serif; font-size: 1.2rem; }
 .confidence, .sicura, .status, .prob {

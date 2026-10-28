@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { PickCard } from "./PickCard";
+import { sortPicks } from "./sortPicks";
 import { usePoll } from "./usePoll";
 import type { MatchPayload } from "@/lib/view";
 
@@ -103,22 +104,21 @@ export function MatchBoard({ id }: { id: string }) {
           <ul>{data.suppressed.map((line) => <li key={line}>{line}</li>)}</ul>
         </section>
       ) : null}
-      {data.markets.map((market) => (
-        <section key={market.id} className="block">
-          <h2>{market.label}</h2>
-          {market.id === "combo" ? (
-            <p className="hint">Due gambe sulla stessa griglia di punteggi: doppia chance, multigol, gol/no gol, under/over. La quota della doppia non è nel flusso, scrivila tu. Se rende pochi centesimi, non conviene.</p>
-          ) : null}
-          {market.note ? <p className="hint">{market.note}</p> : null}
-          {market.picks.length ? (
-            <div className="slip">
-              {market.picks.map((pick) => <PickCard key={pick.id} pick={pick} linked={false} />)}
-            </div>
-          ) : (
-            <p className="empty">Nessuna proposta sopra soglia.</p>
-          )}
-        </section>
-      ))}
+      <section className="block">
+        <h2>Quote di {match.homeName}–{match.awayName}</h2>
+        <p className="hint">
+          Tutte le singole e le doppie di questa partita stanno qui, una sotto l’altra. La quota SNAI non è nel flusso: scrivila sul campo. Se rende pochi centesimi, non conviene.
+        </p>
+        {sortPicks(data.markets.flatMap((market) => market.picks)).length ? (
+          <div className="slip">
+            {sortPicks(data.markets.flatMap((market) => market.picks)).map((pick, index) => (
+              <PickCard key={pick.id} pick={pick} index={index} linked={false} />
+            ))}
+          </div>
+        ) : (
+          <p className="empty">Nessuna proposta sopra soglia.</p>
+        )}
+      </section>
     </section>
   );
 }

@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { judgeStake } from "@/lib/worth";
-import type { GiornataPayload, PickView } from "@/lib/view";
+import type { GiornataPayload, MatchRowView, PickView } from "@/lib/view";
 import { PickCard } from "./PickCard";
+import { sortPicks } from "./sortPicks";
 import { usePoll } from "./usePoll";
 import { useQuotes } from "./useQuotes";
 
@@ -19,27 +20,55 @@ export function GiornataBoard() {
       </section>
     );
   }
-  const split = (picks: PickView[]) => {
-    const stake: PickView[] = [];
-    const held: PickView[] = [];
-    for (const pick of picks) {
-      if (judgeStake(pick.probability, quotes[pick.id], pick.confidence).conviene) stake.push(pick);
-      else held.push(pick);
+  const worthCount = (picks: PickView[]) =>
+    picks.filter((pick) => judgeStake(pick.probability, quotes[pick.id], pick.confidence).conviene).length;
+  const stakeCount = data.slips.reduce((sum, slip) => sum + worthCount(slip.picks), 0);
+  const pickCount = data.slips.reduce((sum, slip) => sum + slip.picks.length, 0);
+  const groupsFor = (day: number, picks: PickView[]) => {
+    const fixtures = data.matchdays.find((item) => item.number === day)?.matches ?? [];
+    const seen = new Set<string>();
+    const groups: { match: MatchRowView; picks: PickView[] }[] = [];
+    for (const match of fixtures) {
+      const mine = sortPicks(picks.filter((pick) => pick.matchId === match.id));
+      if (!mine.length) continue;
+      seen.add(match.id);
+      groups.push({ match, picks: mine });
     }
-    return { stake, held };
+    for (const pick of picks) {
+      if (seen.has(pick.matchId)) continue;
+      seen.add(pick.matchId);
+      const mine = sortPicks(picks.filter((item) => item.matchId === pick.matchId));
+      groups.push({
+        match: {
+          id: pick.matchId,
+          kickoffLabel: pick.kickoffLabel,
+          status: pick.status,
+          minute: null,
+          homeName: pick.homeName,
+          awayName: pick.awayName,
+          homeRank: "",
+          awayRank: "",
+          homeRecord: "",
+          awayRecord: "",
+          scoreLabel: pick.scoreLabel,
+          venue: "",
+          altaCount: 0,
+        },
+        picks: mine,
+      });
+    }
+    return groups;
   };
-  const stakeCount = data.slips.reduce((sum, slip) => sum + split(slip.picks).stake.length, 0);
-  const altaCount = data.slips.reduce((sum, slip) => sum + slip.picks.length, 0);
   return (
     <section className="page">
       <p className={`banner ${data.sample ? "sample" : ""}`}>{data.banner}</p>
       <p className="kicker">Aggiornato {data.updatedLabel} · {data.phase}</p>
       <h1>Cosa conviene puntare</h1>
       <p className="lede">
-        La probabilità alta non basta, né su una singola né su una doppia (doppia chance con multigol, gol o under/over). Su €1 e su €2 l’utile è (quota − 1) × posta: se sono pochi centesimi, o se il valore atteso è negativo, la giocata non entra nell’elenco.
-        {altaCount === 0
-          ? " In questa finestra nessuna proposta supera la soglia di probabilità."
-          : ` ${altaCount} proposte alte, ${stakeCount} da puntare con la quota che hai scritto.`}
+        Le quote si scrivono partita per partita: prima tutte le singole e le doppie di una gara, poi la successiva. Su €1 e su €2 l’utile è (quota − 1) × posta. Pochi centesimi, o un valore atteso negativo, non diventano una giocata da puntare.
+        {pickCount === 0
+          ? " In questa finestra nessuna proposta supera la soglia."
+          : ` ${pickCount} proposte, ${stakeCount} da puntare con la quota che hai scritto.`}
       </p>
       <p className="lede">{data.seasonLabel}</p>
       {data.slips.map((slip) => (
@@ -49,30 +78,28 @@ export function GiornataBoard() {
             <p>{slip.note}</p>
           </header>
           {slip.picks.length ? (
-            <>
-              <h3 className="slip-label">Da puntare</h3>
-              {split(slip.picks).stake.length ? (
+            groupsFor(slip.matchday, slip.picks).map((group) => (
+              <section key={group.match.id} className="match-group">
+                <h3>
+                  {group.match.homeName}–{group.match.awayName}
+                </h3>
+                <p className="hint">
+                  {group.match.status}
+                  {group.match.scoreLabel ? ` · ${group.match.scoreLabel}` : ` · ${group.match.kickoffLabel}`}
+                  {" · "}
+                  {worthCount(group.picks) === 0
+                    ? "Nessuna di queste conviene finché la quota non regge il conto."
+                    : `${worthCount(group.picks)} da puntare con la quota scritta.`}
+                </p>
                 <div className="slip">
-                  {split(slip.picks).stake.map((pick, index) => (
+                  {group.picks.map((pick, index) => (
                     <PickCard key={pick.id} pick={pick} index={index} />
                   ))}
                 </div>
-              ) : (
-                <p className="empty">Nessuna. Senza una quota SNAI che regge il conto non entra in questo elenco.</p>
-              )}
-              {split(slip.picks).held.length ? (
-                <>
-                  <h3 className="slip-label">Non da puntare</h3>
-                  <div className="slip">
-                    {split(slip.picks).held.map((pick, index) => (
-                      <PickCard key={pick.id} pick={pick} index={index} />
-                    ))}
-                  </div>
-                </>
-              ) : null}
-            </>
+              </section>
+            ))
           ) : (
-            <p className="empty">Nessuna proposta ad alta confidenza. Sotto soglia, o con un segnale contrario, resta nella pagina della partita oppure non viene proprio suggerita.</p>
+            <p className="empty">Nessuna proposta sopra soglia. Resta nella pagina della partita oppure non viene proprio suggerita.</p>
           )}
         </section>
       ))}

@@ -252,10 +252,10 @@ export function readGiornata(): GiornataPayload {
     };
   });
   const liveRows = all<ProposalRow>(
-    `${PICK_SQL} WHERE p.origin = 'live' AND p.confidence = 'alta' AND m.status != 'finita' AND m.status != 'rinviata'`,
+    `${PICK_SQL} WHERE p.origin = 'live' AND m.status != 'finita' AND m.status != 'rinviata'`,
   )
     .filter((row) => !busted(row) && (row.matchday === current || row.matchday === next))
-    .sort((a, b) => b.sicura - a.sicura || b.sort_key - a.sort_key);
+    .sort((a, b) => a.kickoff.localeCompare(b.kickoff) || b.sort_key - a.sort_key);
   const slips = focus.map((day) => {
     const tonight = matches.some(
       (match) =>
