@@ -90,12 +90,13 @@ h3 { margin: 0.35rem 0; font-size: 1.35rem; }
 }
 .confidence.alta, .verdict.ok { background: var(--olive); color: #f4faf4; }
 .confidence.media, .verdict.bad { background: var(--terra-soft); color: var(--terra); }
-.quota-row { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: end; margin: 0.7rem 0 0.2rem; }
-.quota-row label { display: grid; gap: 0.2rem; font-size: 0.78rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
-.quota-row input {
-  font: inherit; font-size: 1.05rem; letter-spacing: 0; text-transform: none; color: var(--ink);
-  width: 7.5rem; padding: 0.4rem 0.55rem; border: 1px solid var(--line); border-radius: 0.45rem; background: var(--paper);
-}
+.quota-row { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: baseline; margin: 0.7rem 0 0.2rem; }
+.quota-row span { font-size: 0.78rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.quota-row strong { font-family: var(--font-display), Georgia, serif; font-size: 1.45rem; font-weight: 600; }
+.schedine { display: grid; gap: 0.8rem; margin-top: 0.8rem; }
+.schedina { background: var(--card); border: 1px solid var(--line); border-radius: 1rem; padding: 1rem 1.1rem; }
+.schedina ol { margin: 0.4rem 0; padding-left: 1.2rem; }
+.schedina .verdict { display: inline-block; margin: 0.2rem 0 0.4rem; }
 .quota-row p, .worth { margin: 0.35rem 0; max-width: 40rem; }
 .worth strong { color: var(--ink); }
 .prob { margin-left: auto; background: var(--paper-deep); }

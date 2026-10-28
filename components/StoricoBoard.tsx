@@ -7,6 +7,8 @@ import type { StoricoPayload } from "@/lib/view";
 
 const FILTERS = [
   { id: "tutti", label: "Tutti" },
+  { id: "segno", label: "Segno" },
+  { id: "under_over", label: "Under/Over" },
   { id: "doppia_chance", label: "Doppia chance" },
   { id: "multigol", label: "Multigol" },
   { id: "combo", label: "Doppie" },

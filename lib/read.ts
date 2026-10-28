@@ -1,10 +1,12 @@
 import { all, get, metaGet } from "./db";
 import { focusMatchdays, romeDay } from "./matchday";
+import { assembleSchedina, bestLeg, fasciaOf, type PricedLeg } from "./method";
 import { DATO_ASSENTE, MARKET_LABEL, OUTCOME_LABEL } from "./thresholds";
 import { formatKick, formatNum, formatPct, orDato } from "./format";
 import { RULES } from "./rules";
+import { judgeStake } from "./worth";
 import type { SourceState } from "./types";
-import type { GiornataPayload, MatchPayload, MatchRowView, PickView, SignalChip, StoricoPayload } from "./view";
+import type { GiornataPayload, MatchPayload, MatchRowView, PickView, SchedinaView, SignalChip, StoricoPayload } from "./view";
 
 type MatchRow = {
   id: string;
@@ -45,6 +47,8 @@ type ProposalRow = {
   status: string;
   home_score: number | null;
   away_score: number | null;
+  quota: number | null;
+  quota_book: string | null;
 };
 
 type Played = {
@@ -72,6 +76,9 @@ const SIGNAL_LABEL: Record<string, string> = {
   arbitro: "Arbitro",
   gialli: "Gialli",
   falli: "Falli",
+  rischio: "Fascia",
+  fonte_quota: "Fonte quota",
+  linea: "Linea",
 };
 
 function source(): SourceState {
@@ -88,21 +95,26 @@ function source(): SourceState {
       referee: "dato assente",
       injuries: "dato assente",
       minutes: "dato assente",
+      odds: [],
       updatedAt: null,
       matchCount: 0,
       phase: "in attesa",
       error: null,
     };
   }
-  return JSON.parse(raw) as SourceState;
+  const parsed = JSON.parse(raw) as SourceState;
+  parsed.odds ??= [];
+  return parsed;
 }
 
 function banner(state: SourceState): string {
   if (state.sample) {
     return "Dati di esempio. Le fonti live non hanno risposto: risultati e proposte non sono reali.";
   }
-  if (state.fixtures === "espn") return "Serie A 2026/27 letta da ESPN, endpoint pubblico. Non è un confronto quote.";
-  if (state.fixtures === "football-data") return "Calendario letto da football-data.org. Non è un confronto quote.";
+  if (state.fixtures === "espn") {
+    return "Serie A 2026/27 letta da ESPN. La quota, se c’è, è DraftKings nel tabellone: non è SNAI. Se la fonte non ha il numero, resta dato assente.";
+  }
+  if (state.fixtures === "football-data") return "Calendario letto da football-data.org. Le quote di quel servizio, senza chiave, restano dato assente.";
   return "In attesa delle partite.";
 }
 
@@ -116,6 +128,7 @@ function sourceNotes(state: SourceState): string[] {
     `Partite: ${state.fixtures === "espn" ? "ESPN" : state.fixtures === "football-data" ? "football-data.org" : state.fixtures === "sample" ? "esempio" : DATO_ASSENTE}.`,
     `Formazioni: ${state.lineups}. Arbitro: ${state.referee}. Minuti: ${state.minutes}. Indisponibili: ${state.injuries}.`,
     ...news,
+    ...(state.odds ?? []),
   ];
 }
 
@@ -158,6 +171,9 @@ function toPick(row: ProposalRow): PickView {
     status: row.status,
     scoreLabel: scoreLabel(row.status, row.home_score, row.away_score),
     signals: signalsOf(row.signals_json),
+    quotaRaw: row.quota != null ? String(row.quota) : null,
+    quotaLabel: row.quota != null ? formatNum(row.quota, 2) : DATO_ASSENTE,
+    quotaBook: row.quota_book,
     outcome: row.outcome,
     outcomeLabel: OUTCOME_LABEL[row.outcome] ?? row.outcome,
     originLabel: row.origin === "ricostruzione" ? "ricostruita" : "registrata dal sito",
@@ -285,9 +301,117 @@ export function readGiornata(): GiornataPayload {
     sourceNotes: sourceNotes(state),
     seasonLabel,
     slips,
+    schedine: readSchedine(current),
     matchdays,
     rules: RULES,
   };
+}
+
+function timesOnTen(probability: number | null): string {
+  if (probability == null) return "";
+  const times = probability * 10;
+  if (times < 0.5) return "Vince meno di una volta su 10.";
+  const rounded = Math.round(times);
+  return `Vince circa ${rounded} ${rounded === 1 ? "volta" : "volte"} su 10.`;
+}
+
+const FASCE = [
+  { id: "prudente", title: "Schedina prudente" },
+  { id: "equilibrata", title: "Schedina equilibrata" },
+  { id: "coraggiosa", title: "Schedina coraggiosa" },
+] as const;
+
+function readSchedine(matchday: number | null): SchedinaView[] {
+  if (matchday == null) {
+    return FASCE.map((fascia) => ({
+      id: fascia.id,
+      title: fascia.title,
+      note: "Giornata corrente: dato assente.",
+      events: [],
+      probabilityLabel: DATO_ASSENTE,
+      quotaLabel: DATO_ASSENTE,
+      headline: "Schedina non costruita.",
+      detail: "Senza la giornata non moltiplico probabilità né quote.",
+      conviene: false,
+    }));
+  }
+  const fixtures = all<MatchRow>(
+    "SELECT * FROM matches WHERE matchday = ? ORDER BY kickoff",
+    matchday,
+  );
+  const methods = new Map(
+    all<{ match_id: string; excluded_reason: string | null }>(
+      "SELECT match_id, excluded_reason FROM match_method",
+    ).map((row) => [row.match_id, row.excluded_reason]),
+  );
+  const picks = all<ProposalRow>(
+    `${PICK_SQL} WHERE p.origin = 'live' AND m.matchday = ?`,
+    matchday,
+  );
+  const open = fixtures.filter((match) => match.status === "non iniziata");
+  const started = fixtures.length - open.length;
+  const groups = open.map((match) => {
+    const stored = methods.get(match.id);
+    const legs: PricedLeg[] = picks
+      .filter((row) => row.match_id === match.id && row.quota != null && row.probability != null)
+      .map((row) => ({
+        matchId: match.id,
+        home: match.home_name,
+        away: match.away_name,
+        selection: row.selection,
+        probability: row.probability as number,
+        quota: row.quota as number,
+      }));
+    return {
+      match,
+      excluded: stored === undefined ? "Confronto non ancora calcolato: dato assente. Esclusa dalle multiple." : stored,
+      legs,
+    };
+  });
+  return FASCE.map((fascia) => {
+    const excluded = groups.filter((group) => group.excluded);
+    const included = groups.filter((group) => !group.excluded);
+    const chosen = included
+      .map((group) => bestLeg(group.legs, fascia.id))
+      .filter((leg): leg is PricedLeg => leg != null);
+    const slip = assembleSchedina(chosen);
+    const swaps = included
+      .filter((group) => !bestLeg(group.legs, fascia.id) && group.legs.length)
+      .map((group) => {
+        const top = [...group.legs].sort((a, b) => b.probability - a.probability)[0];
+        return top
+          ? `${group.match.home_name}–${group.match.away_name}: la quota letta più alta in probabilità è ${top.selection} (${formatPct(top.probability)}, fascia ${fasciaOf(top.probability)}). Non entra in ${fascia.id}.`
+          : "";
+      })
+      .filter(Boolean);
+    const reasons = [...new Set(excluded.map((group) => group.excluded).filter((reason): reason is string => Boolean(reason)))];
+    const bits = [
+      started ? `${started} partite già iniziate o chiuse: non entrano in schedina.` : "",
+      excluded.length ? `${excluded.length} ancora da giocare escluse. ${reasons.join(" ")}` : "",
+      ...swaps,
+    ].filter(Boolean);
+    const judgement =
+      slip.probability != null && slip.quota != null ? judgeStake(slip.probability, String(slip.quota)) : null;
+    return {
+      id: fascia.id,
+      title: fascia.title,
+      note: bits.join(" ") || "Una giocata per partita, solo con quota letta e utile non irrisorio. Ordine: dalla meno probabile alla più probabile.",
+      events: slip.events.map((event) => ({
+        matchId: event.matchId,
+        label: `${event.home}–${event.away}`,
+        selection: event.selection,
+        probabilityLabel: formatPct(event.probability),
+        quotaLabel: formatNum(event.quota, 2),
+      })),
+      probabilityLabel: slip.probability == null ? DATO_ASSENTE : formatPct(slip.probability),
+      quotaLabel: slip.quota == null ? DATO_ASSENTE : formatNum(slip.quota, 2),
+      headline: judgement?.headline ?? "Schedina non costruita.",
+      detail: judgement
+        ? `${timesOnTen(slip.probability)} ${judgement.detail}`
+        : "Nessuna gamba con quota letta in questa fascia. Non invento il prodotto.",
+      conviene: judgement?.conviene ?? false,
+    };
+  });
 }
 
 function priorOf(teamId: string, kickoff: string): Played[] {
@@ -379,6 +503,8 @@ export function readPartita(id: string): MatchPayload {
   const suppressed: string[] = assessment ? (JSON.parse(assessment.suppressed_json) as string[]) : [];
   const picks = all<ProposalRow>(`${PICK_SQL} WHERE p.match_id = ? ORDER BY p.sort_key DESC`, id).map(toPick);
   const blocks = [
+    ["segno", "Segno"],
+    ["under_over", "Under/Over"],
     ["doppia_chance", "Doppia chance"],
     ["multigol", "Multigol"],
     ["combo", "Doppia"],
@@ -473,7 +599,7 @@ export function readPartita(id: string): MatchPayload {
 export function readStorico(): StoricoPayload {
   const state = source();
   const rows = all<ProposalRow>(`${PICK_SQL} ORDER BY m.kickoff DESC, p.sort_key DESC`).map(toPick);
-  const markets = ["doppia_chance", "multigol", "combo", "marcatore", "ammonizioni"];
+  const markets = ["segno", "under_over", "doppia_chance", "multigol", "combo", "marcatore", "ammonizioni"];
   const rates = markets.map((market) => {
     const mine = rows.filter((row) => row.market === market);
     const hits = mine.filter((row) => row.outcome === "hit").length;

@@ -48,6 +48,22 @@ export const THRESHOLDS = {
   comboMinPercent: 40,
   /** Congiunta da questa percentuale, e tra le prime della partita: la doppia è alta in homepage. */
   comboAltaPercent: 55,
+  /** Peso del Poisson nella fusione col mercato. Sale dopo 15 giornate. */
+  modelWeightEarly: 0.3,
+  modelWeightLate: 0.45,
+  modelWeightAfterMatches: 15,
+  shrinkK: 5,
+  /** Correzione massima ±20% sui gol attesi per assenze e turnover. */
+  correctionCap: 0.2,
+  absenceForward: 0.9,
+  absenceDefense: 1.05,
+  turnoverFactor: 0.93,
+  fasciaPrudente: 0.8,
+  fasciaEquilibrata: 0.6,
+  fasciaCoraggiosa: 0.35,
+  favoriteMin: 0.4,
+  marketGapExclude: 0.15,
+  multiMaxLegs: 5,
 } as const;
 
 export const DATO_ASSENTE = "dato assente";
@@ -57,6 +73,8 @@ export const MARKET_LABEL: Record<string, string> = {
   multigol: "Multigol",
   marcatore: "Marcatore",
   ammonizioni: "Ammonizioni",
+  segno: "Segno",
+  under_over: "Under/Over",
   combo: "Doppia",
 };
 

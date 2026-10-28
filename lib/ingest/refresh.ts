@@ -5,6 +5,7 @@ import { cardSampleFromCounts, decide } from "../model/engine";
 import { comboHits } from "../combo";
 import { lastName, mentionsAlias } from "../teams";
 import type {
+  BookPrice,
   DecideInput,
   FinishedMatch,
   LineupPlayer,
@@ -15,6 +16,7 @@ import type {
 } from "../types";
 import {
   addDays,
+  parseBookOdds,
   parseRoster,
   parseScoreboard,
   parseStandings,
@@ -23,6 +25,7 @@ import {
   type ParsedMatch,
 } from "./espn";
 import { probeFootballData } from "./football-data";
+import { cachedQuoteNotes, probeQuoteSources, quoteNoteSentence } from "./quotes";
 import { fetchJson, pool } from "./http";
 import { attachTeams, FEEDS, readFeed } from "./news";
 import { sampleMatches } from "./sample";
@@ -72,6 +75,7 @@ function defaultSource(): SourceState {
     referee: "dato assente",
     injuries: "dato assente",
     minutes: "dato assente",
+    odds: [],
     updatedAt: null,
     matchCount: 0,
     phase: "in attesa",
@@ -153,8 +157,44 @@ function storeMatches(matches: ParsedMatch[], provider: string) {
   });
 }
 
+function storeBookOdds(rows: BookPrice[]) {
+  if (!rows.length) return;
+  transaction(() => {
+    for (const row of rows) {
+      run(
+        `INSERT INTO match_odds(match_id, bookmaker, source, read_at, q1, qx, q2, total_line, over_q, under_q)
+         VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(match_id) DO UPDATE SET
+           bookmaker = excluded.bookmaker,
+           source = excluded.source,
+           read_at = excluded.read_at,
+           q1 = excluded.q1,
+           qx = excluded.qx,
+           q2 = excluded.q2,
+           total_line = excluded.total_line,
+           over_q = excluded.over_q,
+           under_q = excluded.under_q`,
+        row.matchId,
+        row.bookmaker,
+        row.source,
+        row.readAt,
+        row.home,
+        row.draw,
+        row.away,
+        row.totalLine,
+        row.over,
+        row.under,
+      );
+    }
+  });
+}
+
 async function syncEspn(): Promise<boolean> {
-  const first = parseScoreboard(await fetchJson(SCOREBOARD));
+  const opening = await fetchJson(SCOREBOARD);
+  const first = parseScoreboard(opening);
+  const readAt = new Date().toISOString();
+  const odds = new Map<string, BookPrice>();
+  for (const row of parseBookOdds(opening, readAt)) odds.set(row.matchId, row);
   const today = ymd(new Date());
   const recent = ymd(addDays(new Date(), -2));
   const nearEnd = ymd(addDays(new Date(), 21));
@@ -174,7 +214,9 @@ async function syncEspn(): Promise<boolean> {
   let done = 0;
   await pool(todo, 6, async (date) => {
     try {
-      const board = parseScoreboard(await fetchJson(`${SCOREBOARD}?dates=${date}`));
+      const payload = await fetchJson(`${SCOREBOARD}?dates=${date}`);
+      const board = parseScoreboard(payload);
+      for (const row of parseBookOdds(payload, readAt)) odds.set(row.matchId, row);
       for (const match of board.matches) collected.set(match.id, match);
       const old = date < recent;
       seen.add(date);
@@ -190,6 +232,7 @@ async function syncEspn(): Promise<boolean> {
   if (!collected.size) return false;
   if (metaGet("data_origin") === "sample") wipeDatabase();
   storeMatches([...collected.values()], "espn");
+  storeBookOdds([...odds.values()]);
   try {
     const table = parseStandings(await fetchJson(STANDINGS));
     const updated = new Date().toISOString();
@@ -632,6 +675,38 @@ function inputFor(match: MatchRow, live: boolean): DecideInput {
       : [],
     now: live ? Date.now() : Date.parse(match.kickoff) - 60_000,
     allowSquad: live,
+    odds: live ? oddsFor(match.id) : null,
+    oddsNote: quoteNoteSentence(),
+  };
+}
+
+function oddsFor(matchId: string): BookPrice | null {
+  const row = get<{
+    bookmaker: string;
+    source: string;
+    read_at: string;
+    q1: number | null;
+    qx: number | null;
+    q2: number | null;
+    total_line: number | null;
+    over_q: number | null;
+    under_q: number | null;
+  }>(
+    "SELECT bookmaker, source, read_at, q1, qx, q2, total_line, over_q, under_q FROM match_odds WHERE match_id = ?",
+    matchId,
+  );
+  if (!row) return null;
+  return {
+    matchId,
+    bookmaker: row.bookmaker,
+    source: row.source,
+    readAt: row.read_at,
+    home: row.q1,
+    draw: row.qx,
+    away: row.q2,
+    totalLine: row.total_line,
+    over: row.over_q,
+    under: row.under_q,
   };
 }
 
@@ -651,8 +726,9 @@ function saveProposals(matchId: string, origin: "live" | "ricostruzione", drafts
       run(
         `INSERT INTO proposals(
           id, match_id, market, selection, confidence, sicura, probability, sort_key, reason, safety_note,
-          signals_json, form_home, form_away, origin, created_at, frozen_at, outcome, outcome_note, settled_at
-        ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          signals_json, form_home, form_away, origin, created_at, frozen_at, outcome, outcome_note, settled_at,
+          quota, quota_book
+        ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
           confidence = excluded.confidence,
           sicura = excluded.sicura,
@@ -663,6 +739,8 @@ function saveProposals(matchId: string, origin: "live" | "ricostruzione", drafts
           signals_json = excluded.signals_json,
           form_home = excluded.form_home,
           form_away = excluded.form_away,
+          quota = excluded.quota,
+          quota_book = excluded.quota_book,
           frozen_at = COALESCE(proposals.frozen_at, excluded.frozen_at),
           outcome = CASE WHEN proposals.outcome IN ('hit', 'miss', 'non_verificabile') THEN proposals.outcome ELSE excluded.outcome END`,
         id,
@@ -684,6 +762,8 @@ function saveProposals(matchId: string, origin: "live" | "ricostruzione", drafts
         old?.outcome ?? "pending",
         old?.outcome_note ?? null,
         old?.settled_at ?? null,
+        draft.quota ?? null,
+        draft.quotaBook ?? null,
       );
     }
   });
@@ -708,6 +788,35 @@ function saveAssessment(matchId: string, result: ReturnType<typeof decide>) {
   );
 }
 
+function saveMethod(matchId: string, result: ReturnType<typeof decide>) {
+  const fusion = result.fusion;
+  run(
+    `INSERT INTO match_method(
+      match_id, market_1, market_x, market_2, model_1, model_x, model_2, weight, excluded_reason, updated_at
+    ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(match_id) DO UPDATE SET
+      market_1 = excluded.market_1,
+      market_x = excluded.market_x,
+      market_2 = excluded.market_2,
+      model_1 = excluded.model_1,
+      model_x = excluded.model_x,
+      model_2 = excluded.model_2,
+      weight = excluded.weight,
+      excluded_reason = excluded.excluded_reason,
+      updated_at = excluded.updated_at`,
+    matchId,
+    fusion.market1,
+    fusion.marketX,
+    fusion.market2,
+    fusion.model1,
+    fusion.modelX,
+    fusion.model2,
+    fusion.weight,
+    fusion.excludedReason,
+    new Date().toISOString(),
+  );
+}
+
 function recompute() {
   const firstRun = Date.parse(metaGet("first_run_at") ?? new Date().toISOString());
   const matches = all<MatchRow>("SELECT * FROM matches");
@@ -728,6 +837,7 @@ function recompute() {
     const result = decide(inputFor(match, true));
     saveProposals(match.id, "live", result.proposals, Date.now() >= kick);
     saveAssessment(match.id, result);
+    saveMethod(match.id, result);
   }
 }
 
@@ -769,6 +879,19 @@ function judge(proposal: {
   const home = proposal.home_score;
   const away = proposal.away_score;
   const result = home > away ? "1" : home === away ? "X" : "2";
+  if (proposal.market === "segno") {
+    const side = proposal.selection.startsWith("1 —") ? "1" : proposal.selection.startsWith("X —") ? "X" : proposal.selection.startsWith("2 —") ? "2" : "";
+    if (!side) return { outcome: "non_verificabile", note: "Segno illeggibile" };
+    return { outcome: side === result ? "hit" : "miss", note: `Risultato ${home}-${away}` };
+  }
+  if (proposal.market === "under_over") {
+    const line = proposal.selection.match(/(\d+),(\d)/);
+    if (!line) return { outcome: "non_verificabile", note: "Linea illeggibile" };
+    const threshold = Number(`${line[1]}.${line[2]}`);
+    const goals = home + away;
+    const hit = proposal.selection.startsWith("Over") ? goals > threshold : goals < threshold;
+    return { outcome: hit ? "hit" : "miss", note: `Gol totali ${goals}` };
+  }
   if (proposal.market === "doppia_chance") {
     const hit =
       (proposal.selection.startsWith("1X") && result !== "2") ||
@@ -818,6 +941,15 @@ function judge(proposal: {
 export async function refresh(mode: Mode) {
   console.log(`[margine] aggiornamento ${mode}`);
   try {
+    if (mode === "startup" || mode === "news") {
+      try {
+        const notes = await probeQuoteSources();
+        saveSource({ odds: notes });
+      } catch (error) {
+        console.error("[margine] quote", error instanceof Error ? error.message : error);
+        saveSource({ odds: cachedQuoteNotes() });
+      }
+    }
     if (mode === "startup" || mode === "news") {
       saveSource({ phase: "Lettura calendario" });
       await syncFixtures();

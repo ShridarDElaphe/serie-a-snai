@@ -1,4 +1,5 @@
-import type { MatchStatus } from "../types";
+import { americanToDecimal } from "../method";
+import type { BookPrice, MatchStatus } from "../types";
 import { italianName } from "../teams";
 
 export type ParsedMatch = {
@@ -138,6 +139,64 @@ export function parseEvent(event: unknown): ParsedMatch | null {
     venue: str(venueNode?.fullName) ?? str(venueNode?.displayName),
     referee,
   };
+}
+
+function americanPrice(value: unknown): number | null {
+  return americanToDecimal(value);
+}
+
+function priceNode(node: unknown): number | null {
+  const object = rec(node);
+  if (!object) return americanPrice(node);
+  const close = rec(object.close);
+  const open = rec(object.open);
+  return americanPrice(close?.odds ?? open?.odds ?? object.odds ?? object.moneyLine);
+}
+
+function totalLine(node: unknown, fallback: number | null): number | null {
+  if (typeof node === "number" && Number.isFinite(node)) return node;
+  if (typeof node === "string") {
+    const match = node.match(/(\d+(?:[.,]\d+)?)/);
+    if (match) return Number(match[1].replace(",", "."));
+  }
+  return fallback;
+}
+
+/** Quote DraftKings (o altro provider) già dentro il tabellone ESPN. Nessun numero viene riempito se il campo manca. */
+export function parseBookOdds(payload: unknown, readAt = new Date().toISOString()): BookPrice[] {
+  const root = rec(payload);
+  const rows: BookPrice[] = [];
+  for (const event of arr(root?.events)) {
+    const node = rec(event);
+    const competition = rec(arr(node?.competitions)[0]);
+    const id = str(node?.id) ?? str(competition?.id);
+    const odds = rec(arr(competition?.odds)[0]);
+    if (!id || !odds) continue;
+    const provider = rec(odds.provider);
+    const moneyline = rec(odds.moneyline);
+    const total = rec(odds.total);
+    const home = priceNode(moneyline?.home);
+    const away = priceNode(moneyline?.away);
+    const draw = priceNode(moneyline?.draw) ?? americanPrice(rec(odds.drawOdds)?.moneyLine);
+    const overClose = rec(rec(total?.over)?.close);
+    const line = totalLine(overClose?.line, num(odds.overUnder));
+    const over = priceNode(total?.over);
+    const under = priceNode(total?.under);
+    if (home == null && draw == null && away == null && over == null && under == null) continue;
+    rows.push({
+      matchId: id,
+      bookmaker: str(provider?.displayName) ?? str(provider?.name) ?? "ESPN",
+      source: "ESPN scoreboard",
+      readAt,
+      home,
+      draw,
+      away,
+      totalLine: line,
+      over,
+      under,
+    });
+  }
+  return rows;
 }
 
 export function parseScoreboard(payload: unknown): { matches: ParsedMatch[]; dates: string[] } {

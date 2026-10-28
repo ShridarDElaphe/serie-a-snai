@@ -3,12 +3,9 @@
 import Link from "next/link";
 import { judgeStake } from "@/lib/worth";
 import type { PickView } from "@/lib/view";
-import { setQuote, useQuotes } from "./useQuotes";
 
 export function PickCard({ pick, index, linked = true }: { pick: PickView; index?: number; linked?: boolean }) {
-  const quotes = useQuotes();
-  const raw = quotes[pick.id] ?? "";
-  const judgement = judgeStake(pick.probability, raw, pick.confidence);
+  const judgement = judgeStake(pick.probability, pick.quotaRaw, pick.confidence);
   return (
     <article className={`pick ${pick.confidence} ${judgement.conviene ? "conviene" : "non-conviene"}`}>
       <div className="pick-top">
@@ -22,19 +19,10 @@ export function PickCard({ pick, index, linked = true }: { pick: PickView; index
         {pick.homeName}–{pick.awayName} · {pick.kickoffLabel} · {pick.status}
         {pick.scoreLabel ? ` · ${pick.scoreLabel}` : ""}
       </p>
-      <div className="quota-row">
-        <label>
-          Quota SNAI
-          <input
-            inputMode="decimal"
-            placeholder="es. 1,50"
-            aria-label={`Quota SNAI per ${pick.selection}`}
-            value={raw}
-            onChange={(event) => setQuote(pick.id, event.target.value)}
-          />
-        </label>
-        <p>Poste di prova: €1 e €2. Il campo resta vuoto finché non scrivi la quota.</p>
-      </div>
+      <p className="quota-row">
+        <span>Quota {pick.quotaBook ?? "letta"}</span>
+        <strong>{pick.quotaLabel}</strong>
+      </p>
       <p className="worth">
         <strong>{judgement.headline}</strong> {judgement.detail}
       </p>

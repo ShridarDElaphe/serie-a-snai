@@ -20,7 +20,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <footer className="site-footer">
           <p>
             <strong>Nessuna proposta è una vincita sicura.</strong> Una probabilità alta non basta.
-            La quota SNAI non è nel flusso dati: la scrivi tu. Finché manca, la giocata non è conveniente.
+            La quota è quella letta da una fonte: se la fonte non risponde, il numero è dato assente e la giocata non è conveniente.
             Se l’utile su €1 è sotto 10 centesimi, come una quota 1,08, o se il valore atteso è negativo, esce dall’elenco da puntare.
             Decidi tu. Il gioco è vietato ai minori e può creare dipendenza.
           </p>

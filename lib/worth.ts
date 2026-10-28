@@ -50,7 +50,7 @@ export function judgeStake(
       verdict: "manca",
       conviene: false,
       headline: "Quota mancante.",
-      detail: "Non la chiamo conveniente finché non scrivi la quota SNAI. Il sito non la legge dal bookmaker.",
+      detail: "Il numero è dato assente. Non lo invento e non la chiamo conveniente.",
     };
   }
   const quota = parsed.quota;
@@ -89,7 +89,7 @@ export function judgeStake(
   return {
     verdict: "conviene",
     conviene: true,
-    headline: "Conviene sul prezzo inserito.",
+    headline: "Conviene sul prezzo letto.",
     detail: `${profits}. ${lose} ${expected} L'utile atteso è positivo e non è di pochi centesimi. Non è una vincita garantita.`,
   };
 }

@@ -21,9 +21,24 @@ export type PickView = {
   status: string;
   scoreLabel: string | null;
   signals: SignalChip[];
+  quotaRaw: string | null;
+  quotaLabel: string;
+  quotaBook: string | null;
   outcome: string;
   outcomeLabel: string;
   originLabel: string;
+};
+
+export type SchedinaView = {
+  id: "prudente" | "equilibrata" | "coraggiosa";
+  title: string;
+  note: string;
+  events: { matchId: string; label: string; selection: string; probabilityLabel: string; quotaLabel: string }[];
+  probabilityLabel: string;
+  quotaLabel: string;
+  headline: string;
+  detail: string;
+  conviene: boolean;
 };
 
 export type MatchRowView = {
@@ -51,6 +66,7 @@ export type GiornataPayload = {
   sourceNotes: string[];
   seasonLabel: string;
   slips: { matchday: number; role: string; title: string; note: string; picks: PickView[] }[];
+  schedine: SchedinaView[];
   matchdays: { number: number; role: string; title: string; matches: MatchRowView[] }[];
   rules: string[];
 };

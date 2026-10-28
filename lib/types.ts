@@ -1,4 +1,4 @@
-export type Market = "doppia_chance" | "multigol" | "marcatore" | "ammonizioni" | "combo";
+export type Market = "segno" | "doppia_chance" | "under_over" | "multigol" | "marcatore" | "ammonizioni" | "combo";
 export type Confidence = "alta" | "media";
 export type Origin = "live" | "ricostruzione";
 export type Outcome = "pending" | "hit" | "miss" | "non_verificabile" | "void";
@@ -88,6 +88,9 @@ export type ProposalDraft = {
   /** Stima Poisson solo per doppia chance e multigol. Null se il numero non è calcolabile senza inventarlo. */
   probability: number | null;
   sortKey: number;
+  /** Prezzo letto da un bookmaker. Null se la fonte non ha quel mercato: non si inventa. */
+  quota?: number | null;
+  quotaBook?: string | null;
   reason: string;
   safetyNote: string;
   signals: Record<string, string | number | boolean | null>;
@@ -111,6 +114,34 @@ export type DecideInput = {
   news: NewsItem[];
   now: number;
   allowSquad: boolean;
+  /** Quote 1X2 e totale lette da una fonte. Null se nessuna fonte ha risposto con un numero. */
+  odds: BookPrice | null;
+  /** Fonti quote non chiamabili, in una frase. */
+  oddsNote: string;
+};
+
+export type BookPrice = {
+  matchId: string;
+  bookmaker: string;
+  source: string;
+  readAt: string;
+  home: number | null;
+  draw: number | null;
+  away: number | null;
+  totalLine: number | null;
+  over: number | null;
+  under: number | null;
+};
+
+export type FusionState = {
+  market1: number | null;
+  marketX: number | null;
+  market2: number | null;
+  model1: number | null;
+  modelX: number | null;
+  model2: number | null;
+  weight: number | null;
+  excludedReason: string | null;
 };
 
 export type DecideResult = {
@@ -121,6 +152,7 @@ export type DecideResult = {
   expectedAway: number | null;
   formHome: string;
   formAway: string;
+  fusion: FusionState;
 };
 
 export type SourceState = {
@@ -134,6 +166,8 @@ export type SourceState = {
   referee: "presente" | "dato assente";
   injuries: "presenti" | "nessuno segnalato" | "dato assente";
   minutes: "dato assente";
+  /** Esito del tentativo su ogni fonte quote del metodo. */
+  odds: string[];
   updatedAt: string | null;
   matchCount: number;
   phase: string;

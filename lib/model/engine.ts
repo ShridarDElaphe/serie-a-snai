@@ -1,11 +1,27 @@
 import { comboOverlaps } from "../combo";
-import { formatNum, formatPct, percent } from "../format";
+import { formatKick, formatNum, formatPct, percent } from "../format";
+import {
+  blendGrid,
+  capFactor,
+  fasciaOf,
+  fusionSentence,
+  gridJoint,
+  gridTotals,
+  implied1x2,
+  methodLambdas,
+  modelWeight,
+  multipleExclusion,
+  outcomeProbs,
+  poissonGrid,
+} from "../method";
 import { fold, lastName, mentionsAlias } from "../teams";
 import { DATO_ASSENTE, THRESHOLDS } from "../thresholds";
 import type {
+  BookPrice,
   DecideInput,
   DecideResult,
   FinishedMatch,
+  FusionState,
   ProposalDraft,
   SignalValue,
   StandingRow,
@@ -245,13 +261,46 @@ function signalWord(value: boolean | null): SignalValue {
 
 function safetyNote(probability: number | null, alta: boolean): string {
   if (probability == null) {
-    return `I segnali ${alta ? "sono larghi" : "superano la soglia ma sono più stretti"}. La probabilità numerica è ${DATO_ASSENTE}: non viene inventata. Senza quel numero e senza la quota SNAI non dico se conviene puntare.`;
+    return `I segnali ${alta ? "sono larghi" : "superano la soglia ma sono più stretti"}. La probabilità numerica è ${DATO_ASSENTE}: non viene inventata. Senza quel numero e senza una quota letta non dico se conviene puntare.`;
   }
   const high = percent(probability) >= THRESHOLDS.dcAltaPercent;
   const head = high
-    ? "Probabilità stimata alta. Non basta per puntare: la quota SNAI va scritta a mano, e pochi centesimi di utile non pagano il rischio di perdere la posta."
-    : "Probabilità sopra la soglia, con un margine più stretto. La quota SNAI va scritta a mano prima di chiamarla conveniente.";
+    ? "Probabilità stimata alta. Non basta per puntare: se la quota letta rende pochi centesimi, come 1,08, non paga il rischio di perdere la posta."
+    : "Probabilità sopra la soglia, con un margine più stretto. Senza una quota letta non è conveniente, e un utile di pochi centesimi non lo diventa.";
   return `${head} Non è una vincita garantita: decidi tu.`;
+}
+
+function emptyFusion(reason: string | null = "Quote 1X2 incomplete: dato assente. Esclusa dalle multiple."): FusionState {
+  return {
+    market1: null,
+    marketX: null,
+    market2: null,
+    model1: null,
+    modelX: null,
+    model2: null,
+    weight: null,
+    excludedReason: reason,
+  };
+}
+
+function attackRole(position: string | null): "attacco" | "difesa" | null {
+  if (!position) return null;
+  const value = fold(position);
+  if (/goal|portier|keeper|^g$/.test(value)) return "difesa";
+  if (/defen|difens|^d$|back/.test(value)) return "difesa";
+  if (/forw|attacc|striker|^f$/.test(value)) return "attacco";
+  return null;
+}
+
+function leagueMu(prior: FinishedMatch[]): { muHome: number; muAway: number } | null {
+  if (!prior.length) return null;
+  let home = 0;
+  let away = 0;
+  for (const match of prior) {
+    home += match.homeGoals;
+    away += match.awayGoals;
+  }
+  return { muHome: home / prior.length, muAway: away / prior.length };
 }
 
 function isKeeper(position: string | null): boolean {
@@ -303,6 +352,118 @@ function downgrade(draft: ProposalDraft, why: string): ProposalDraft | null {
   return null;
 }
 
+function quotedBook(odds: BookPrice | null | undefined): { home: number; draw: number; away: number } | null {
+  if (!odds || odds.home == null || odds.draw == null || odds.away == null) return null;
+  if (!(odds.home > 1 && odds.draw > 1 && odds.away > 1)) return null;
+  return { home: odds.home, draw: odds.draw, away: odds.away };
+}
+
+function absenceScale(input: DecideInput): { home: number; away: number; note: string } {
+  let home = 1;
+  let away = 1;
+  const unknown: string[] = [];
+  for (const injury of input.injuries) {
+    const player = input.players.find(
+      (item) => item.teamId === injury.teamId && mentionsAlias(item.name, lastName(injury.playerName) ?? injury.playerName),
+    );
+    const role = attackRole(player?.position ?? null);
+    if (!player || !role) {
+      unknown.push(injury.playerName);
+      continue;
+    }
+    if (role === "attacco") {
+      if (injury.teamId === input.homeId) home *= THRESHOLDS.absenceForward;
+      else away *= THRESHOLDS.absenceForward;
+    } else if (injury.teamId === input.homeId) away *= THRESHOLDS.absenceDefense;
+    else home *= THRESHOLDS.absenceDefense;
+  }
+  const shock = freshNews(input).find(shockText);
+  if (shock) {
+    const text = fold(`${shock.title} ${shock.summary}`);
+    const homeNamed = mentionsAlias(text, input.homeName);
+    const awayNamed = mentionsAlias(text, input.awayName);
+    if (homeNamed || !awayNamed) home *= THRESHOLDS.turnoverFactor;
+    if (awayNamed || !homeNamed) away *= THRESHOLDS.turnoverFactor;
+  }
+  home = capFactor(home);
+  away = capFactor(away);
+  const coach = freshNews(input).some((item) =>
+    /allenatore/.test(fold(`${item.title} ${item.summary}`)) &&
+    /esoner|nuov|cambi|squalif/.test(fold(`${item.title} ${item.summary}`)),
+  );
+  const bits = ["Correzioni del metodo, al massimo ±20%, solo con un ruolo noto."];
+  if (!input.injuries.length) bits.push("Indisponibili strutturati: dato assente, nessuna correzione.");
+  else if (unknown.length) bits.push(`Ruolo non noto per ${unknown.slice(0, 3).join(", ")}: dato assente, nessuna correzione su quei nomi.`);
+  if (shock) bits.push("Turnover citato nell'ultima ora: gol attesi ridotti, entro il tetto.");
+  if (coach) bits.push("Allenatore cambiato o squalificato: solo avviso, i gol attesi non si muovono per questo.");
+  return { home, away, note: bits.join(" ") };
+}
+
+function priceOf(market: ProposalDraft["market"], selection: string, odds: BookPrice | null | undefined): number | null {
+  if (!odds) return null;
+  if (market === "segno") {
+    if (selection.startsWith("1 —")) return odds.home;
+    if (selection.startsWith("X —")) return odds.draw;
+    if (selection.startsWith("2 —")) return odds.away;
+  }
+  if (market === "under_over" && odds.totalLine != null) {
+    const line = selection.match(/(\d+),(\d)/);
+    if (!line) return null;
+    const value = Number(`${line[1]}.${line[2]}`);
+    if (Math.abs(value - odds.totalLine) > 0.01) return null;
+    if (selection.startsWith("Over")) return odds.over;
+    if (selection.startsWith("Under")) return odds.under;
+  }
+  return null;
+}
+
+function explainDraft(
+  input: DecideInput,
+  draft: ProposalDraft,
+  fusion: FusionState,
+  homeRow: StandingRow | null,
+  awayRow: StandingRow | null,
+): string {
+  const table =
+    homeRow && awayRow
+      ? `${input.homeName} ${homeRow.gf} gol fatti e ${homeRow.ga} subiti in ${homeRow.played} partite (${homeRow.points} punti), ${input.awayName} ${awayRow.gf}-${awayRow.ga} in ${awayRow.played} (${awayRow.points} punti). Forma ${draft.formHome} / ${draft.formAway}.`
+      : `Classifica numerica: ${DATO_ASSENTE}. Forma ${draft.formHome} / ${draft.formAway}.`;
+  const missing = input.injuries.length
+    ? `Assenze in elenco: ${input.injuries.slice(0, 4).map((item) => item.playerName).join(", ")}.`
+    : "Indisponibili nel flusso ESPN: nessuno segnalato. Eurosport e L'Angolo non hanno un campo strutturato, quindi quei nomi restano dato assente.";
+  const quota = draft.quota;
+  const price =
+    quota != null && draft.quotaBook
+      ? `Quota ${formatNum(quota, 2)} da ${draft.quotaBook}${input.odds?.readAt ? `, letta il ${formatKick(input.odds.readAt)}` : ""}. Non è la quota SNAI.`
+      : `Quota di questo mercato: ${DATO_ASSENTE}. ${input.oddsNote || "Nessuna fonte ha un numero per questa riga."}`;
+  const fused = fusionSentence(
+    fusion.market1 != null && fusion.marketX != null && fusion.market2 != null
+      ? { p1: fusion.market1, px: fusion.marketX, p2: fusion.market2 }
+      : null,
+    fusion.model1 != null && fusion.modelX != null && fusion.model2 != null
+      ? { p1: fusion.model1, px: fusion.modelX, p2: fusion.model2 }
+      : null,
+    fusion.weight,
+  );
+  return `Perché: ${table} ${missing} ${price} ${fused}`;
+}
+
+function decorate(result: DecideResult, input: DecideInput, homeRow: StandingRow | null, awayRow: StandingRow | null): DecideResult {
+  result.proposals = result.proposals.map((draft) => {
+    const quota = priceOf(draft.market, draft.selection, input.odds);
+    const next: ProposalDraft = {
+      ...draft,
+      quota,
+      quotaBook: quota != null ? input.odds?.bookmaker ?? null : null,
+    };
+    const fascia = next.probability == null ? DATO_ASSENTE : fasciaOf(next.probability);
+    next.signals = { ...next.signals, rischio: fascia, fonte_quota: next.quotaBook ?? DATO_ASSENTE };
+    next.reason = `${next.reason} ${explainDraft(input, next, result.fusion, homeRow, awayRow)}`;
+    return next;
+  });
+  return result;
+}
+
 export function decide(input: DecideInput): DecideResult {
   const names = new Map<string, string>([
     [input.homeId, input.homeName],
@@ -323,6 +484,7 @@ export function decide(input: DecideInput): DecideResult {
   const notes: string[] = [];
   const suppressed: string[] = [];
   const proposals: ProposalDraft[] = [];
+  let fusion: FusionState = emptyFusion();
 
   const table = input.standings ?? standingsFromResults(input.prior, names);
   const homeRow = table.find((row) => row.teamId === input.homeId) ?? null;
@@ -358,8 +520,51 @@ export function decide(input: DecideInput): DecideResult {
     const clampedAway = clampLambda(lambdaAway);
     lambdaHome = clampedHome.value;
     lambdaAway = clampedAway.value;
-    const probs = scoreProbs(lambdaHome, lambdaAway);
+    const quoted = quotedBook(input.odds);
+    const muLeague = leagueMu(input.prior);
+    const method =
+      quoted && muLeague
+        ? methodLambdas({
+            homeGf: homeRow?.gf ?? homeSeason.gf,
+            homeGa: homeRow?.ga ?? homeSeason.ga,
+            homePlayed: homeRow?.played || homeSeason.n,
+            awayGf: awayRow?.gf ?? awaySeason.gf,
+            awayGa: awayRow?.ga ?? awaySeason.ga,
+            awayPlayed: awayRow?.played || awaySeason.n,
+            muHome: muLeague.muHome,
+            muAway: muLeague.muAway,
+          })
+        : null;
+    const absence = method ? absenceScale(input) : null;
+    if (method && absence) {
+      lambdaHome = clampLambda(method.home * absence.home).value;
+      lambdaAway = clampLambda(method.away * absence.away).value;
+      if (absence.note) notes.push(absence.note);
+    }
+    const market = quoted ? implied1x2(quoted.home, quoted.draw, quoted.away) : null;
+    const modelGrid = method ? poissonGrid(lambdaHome, lambdaAway, 7) : null;
+    const model = modelGrid ? outcomeProbs(modelGrid) : null;
+    const weight = model ? modelWeight(Math.min(homeRow?.played || homeSeason.n, awayRow?.played || awaySeason.n)) : null;
+    const grid = modelGrid && market && weight != null ? blendGrid(modelGrid, market, weight) : null;
+    const blended = grid ? outcomeProbs(grid) : null;
+    const poisson = scoreProbs(lambdaHome, lambdaAway);
+    const probs = blended ? { ...blended, total: gridTotals(grid as number[][]) } : poisson;
     const mu = lambdaHome + lambdaAway;
+    fusion = {
+      market1: market?.p1 ?? null,
+      marketX: market?.px ?? null,
+      market2: market?.p2 ?? null,
+      model1: model?.p1 ?? null,
+      modelX: model?.px ?? null,
+      model2: model?.p2 ?? null,
+      weight,
+      excludedReason: multipleExclusion({
+        oddsComplete: Boolean(quoted && market),
+        lineup: (input.lineup ?? []).filter((player) => player.starter).length >= 11,
+        market,
+        model,
+      }),
+    };
 
     const homeVenue = summarize(homeHome, input.homeId);
     const awayVenue = summarize(awayAway, input.awayId);
@@ -516,40 +721,53 @@ export function decide(input: DecideInput): DecideResult {
       }
     }
 
-    proposals.push(...comboDrafts(input, proposals, lambdaHome, lambdaAway, formHome, formAway));
+    proposals.push(...pricedDrafts(input, grid, market, lambdaHome, lambdaAway, formHome, formAway));
+    proposals.push(...comboDrafts(input, proposals, lambdaHome, lambdaAway, formHome, formAway, grid));
 
     const squad = squadPicks(input, formHome, formAway, lambdaHome, lambdaAway);
     proposals.push(...squad.proposals);
     notes.push(...squad.notes);
 
-    return applyNews(
-      {
-        proposals,
-        notes,
-        suppressed,
-        expectedHome: lambdaHome,
-        expectedAway: lambdaAway,
-        formHome,
-        formAway,
-      },
+    return decorate(
+      applyNews(
+        {
+          proposals,
+          notes,
+          suppressed,
+          expectedHome: lambdaHome,
+          expectedAway: lambdaAway,
+          formHome,
+          formAway,
+          fusion,
+        },
+        input,
+      ),
       input,
+      homeRow,
+      awayRow,
     );
   }
 
   const squad = squadPicks(input, formHome, formAway, null, null);
   proposals.push(...squad.proposals);
   notes.push(...squad.notes);
-  return applyNews(
-    {
-      proposals,
-      notes,
-      suppressed,
-      expectedHome: null,
-      expectedAway: null,
-      formHome,
-      formAway,
-    },
+  return decorate(
+    applyNews(
+      {
+        proposals,
+        notes,
+        suppressed,
+        expectedHome: null,
+        expectedAway: null,
+        formHome,
+        formAway,
+        fusion,
+      },
+      input,
+    ),
     input,
+    homeRow,
+    awayRow,
   );
 }
 
@@ -560,6 +778,70 @@ type ComboLeg = {
   pred: ScorePred;
 };
 
+function pricedDrafts(
+  input: DecideInput,
+  grid: number[][] | null,
+  market: { p1: number; px: number; p2: number } | null,
+  lambdaHome: number,
+  lambdaAway: number,
+  formHome: string,
+  formAway: string,
+): ProposalDraft[] {
+  const odds = input.odds;
+  if (!odds) return [];
+  const fused = grid ? outcomeProbs(grid) : null;
+  const drafts: ProposalDraft[] = [];
+  const signs = [
+    { key: "1", selection: `1 — ${input.homeName}`, probability: fused?.p1 ?? market?.p1 ?? null, quota: odds.home },
+    { key: "X", selection: "X — pareggio", probability: fused?.px ?? market?.px ?? null, quota: odds.draw },
+    { key: "2", selection: `2 — ${input.awayName}`, probability: fused?.p2 ?? market?.p2 ?? null, quota: odds.away },
+  ];
+  for (const sign of signs) {
+    if (sign.quota == null) continue;
+    const alta = sign.probability != null && percent(sign.probability) >= THRESHOLDS.dcAltaPercent;
+    drafts.push({
+      market: "segno",
+      selection: sign.selection,
+      confidence: alta ? "alta" : "media",
+      sicura: false,
+      probability: sign.probability,
+      sortKey: sign.probability ?? 0,
+      reason: `Segno ${sign.key}. La quota è quella letta dal bookmaker, non un prezzo equo calcolato come 1/probabilità e non una quota SNAI.`,
+      safetyNote: safetyNote(sign.probability, alta),
+      signals: { probabilita: sign.probability == null ? null : percent(sign.probability) },
+      formHome,
+      formAway,
+    });
+  }
+  if (odds.totalLine == null || odds.over == null || odds.under == null) return drafts;
+  const line = odds.totalLine;
+  const overPred = (home: number, away: number) => home + away > line;
+  const underPred = (home: number, away: number) => home + away < line;
+  const overP = grid ? gridJoint(grid, [overPred]) : scoreJoint(lambdaHome, lambdaAway, [overPred]);
+  const underP = grid ? gridJoint(grid, [underPred]) : scoreJoint(lambdaHome, lambdaAway, [underPred]);
+  const label = formatNum(line, 1);
+  for (const side of [
+    { selection: `Over ${label}`, probability: overP },
+    { selection: `Under ${label}`, probability: underP },
+  ]) {
+    const alta = percent(side.probability) >= THRESHOLDS.dcAltaPercent;
+    drafts.push({
+      market: "under_over",
+      selection: side.selection,
+      confidence: alta ? "alta" : "media",
+      sicura: false,
+      probability: side.probability,
+      sortKey: side.probability,
+      reason: `Linea ${label} pubblicata insieme al segno. La quota è del bookmaker su questa linea, non sulle altre (1,5 o 3,5 se non sono nel flusso).`,
+      safetyNote: safetyNote(side.probability, alta),
+      signals: { probabilita: percent(side.probability), linea: label },
+      formHome,
+      formAway,
+    });
+  }
+  return drafts;
+}
+
 function comboDrafts(
   input: DecideInput,
   proposals: ProposalDraft[],
@@ -567,7 +849,9 @@ function comboDrafts(
   lambdaAway: number,
   formHome: string,
   formAway: string,
+  grid: number[][] | null,
 ): ProposalDraft[] {
+  const jointOf = (preds: ScorePred[]) => (grid ? gridJoint(grid, preds) : scoreJoint(lambdaHome, lambdaAway, preds));
   const legs: ComboLeg[] = [];
   for (const draft of proposals) {
     if (draft.market === "doppia_chance" && draft.probability != null) {
@@ -591,8 +875,8 @@ function comboDrafts(
       });
     }
   }
-  const gol = scoreJoint(lambdaHome, lambdaAway, [(home, away) => home > 0 && away > 0]);
-  const noGol = scoreJoint(lambdaHome, lambdaAway, [(home, away) => home === 0 || away === 0]);
+  const gol = jointOf([(home, away) => home > 0 && away > 0]);
+  const noGol = jointOf([(home, away) => home === 0 || away === 0]);
   const goalSides = [
     { token: "Gol", marginal: gol, pred: (home: number, away: number) => home > 0 && away > 0 },
     { token: "No gol", marginal: noGol, pred: (home: number, away: number) => home === 0 || away === 0 },
@@ -603,8 +887,8 @@ function comboDrafts(
   const lines = [1.5, 2.5, 3.5];
   const ou = lines
     .map((line) => {
-      const over = scoreJoint(lambdaHome, lambdaAway, [(home, away) => home + away > line]);
-      const under = scoreJoint(lambdaHome, lambdaAway, [(home, away) => home + away < line]);
+      const over = jointOf([(home, away) => home + away > line]);
+      const under = jointOf([(home, away) => home + away < line]);
       const label = formatNum(line, 1);
       return over >= under
         ? { token: `Over ${label}`, marginal: over, pred: (home: number, away: number) => home + away > line }
@@ -622,7 +906,7 @@ function comboDrafts(
       const right = legs[j];
       if (left.family === right.family) continue;
       if (comboOverlaps(left.token, right.token)) continue;
-      const joint = scoreJoint(lambdaHome, lambdaAway, [left.pred, right.pred]);
+      const joint = jointOf([left.pred, right.pred]);
       if (percent(joint) < THRESHOLDS.comboMinPercent) continue;
       const alta = percent(joint) >= THRESHOLDS.comboAltaPercent;
       drafts.push({
@@ -632,7 +916,7 @@ function comboDrafts(
         sicura: false,
         probability: joint,
         sortKey: joint,
-        reason: `Doppia su ${input.homeName}–${input.awayName}. La probabilità è quella dei punteggi che soddisfano entrambe le gambe, non il prodotto di due eventi staccati. ${left.token} da sola ${formatPct(left.marginal)}, ${right.token} da sola ${formatPct(right.marginal)}, insieme ${formatPct(joint)}. La quota SNAI della doppia non è nel flusso: va scritta a mano. Senza quella quota non è conveniente.`,
+        reason: `Doppia su ${input.homeName}–${input.awayName}. La probabilità è quella dei punteggi che soddisfano entrambe le gambe, non il prodotto di due eventi staccati. ${left.token} da sola ${formatPct(left.marginal)}, ${right.token} da sola ${formatPct(right.marginal)}, insieme ${formatPct(joint)}. La quota della doppia non è pubblicata: resta ${DATO_ASSENTE}, non un prodotto delle due quote.`,
         safetyNote: safetyNote(joint, alta),
         signals: {
           gamba1: left.token,

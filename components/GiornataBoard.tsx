@@ -6,11 +6,9 @@ import type { GiornataPayload, MatchRowView, PickView } from "@/lib/view";
 import { PickCard } from "./PickCard";
 import { sortPicks } from "./sortPicks";
 import { usePoll } from "./usePoll";
-import { useQuotes } from "./useQuotes";
 
 export function GiornataBoard() {
   const { data, error } = usePoll<GiornataPayload>("/api/giornata");
-  const quotes = useQuotes();
   if (!data) {
     return (
       <section className="page">
@@ -21,7 +19,7 @@ export function GiornataBoard() {
     );
   }
   const worthCount = (picks: PickView[]) =>
-    picks.filter((pick) => judgeStake(pick.probability, quotes[pick.id], pick.confidence).conviene).length;
+    picks.filter((pick) => judgeStake(pick.probability, pick.quotaRaw, pick.confidence).conviene).length;
   const stakeCount = data.slips.reduce((sum, slip) => sum + worthCount(slip.picks), 0);
   const pickCount = data.slips.reduce((sum, slip) => sum + slip.picks.length, 0);
   const groupsFor = (day: number, picks: PickView[]) => {
@@ -65,12 +63,43 @@ export function GiornataBoard() {
       <p className="kicker">Aggiornato {data.updatedLabel} · {data.phase}</p>
       <h1>Cosa conviene puntare</h1>
       <p className="lede">
-        Le quote si scrivono partita per partita: prima tutte le singole e le doppie di una gara, poi la successiva. Su €1 e su €2 l’utile è (quota − 1) × posta. Pochi centesimi, o un valore atteso negativo, non diventano una giocata da puntare.
+        Le giocate restano raggruppate per partita. La quota arriva da una fonte, se la fonte risponde: non c’è un campo da compilare. Su €1 e su €2 l’utile è (quota − 1) × posta. Pochi centesimi, come 1,08, o un valore atteso negativo, non diventano una giocata da puntare.
         {pickCount === 0
           ? " In questa finestra nessuna proposta supera la soglia."
-          : ` ${pickCount} proposte, ${stakeCount} da puntare con la quota che hai scritto.`}
+          : ` ${pickCount} proposte, ${stakeCount} da puntare sul prezzo letto.`}
       </p>
       <p className="lede">{data.seasonLabel}</p>
+      <section className="block">
+        <header className="block-head">
+          <h2>Schedine del metodo</h2>
+          <p>Prudente, equilibrata, coraggiosa. Al massimo cinque eventi, dal meno probabile al più probabile. La quota della multipla è il prodotto delle quote lette.</p>
+        </header>
+        <div className="schedine">
+          {data.schedine.map((slip) => (
+            <article key={slip.id} className={`schedina ${slip.conviene ? "conviene" : "non-conviene"}`}>
+              <h3>{slip.title}</h3>
+              <p className={`verdict ${slip.conviene ? "ok" : "bad"}`}>{slip.headline.replace(/\.$/, "")}</p>
+              <p>{slip.note}</p>
+              {slip.events.length ? (
+                <ol>
+                  {slip.events.map((event) => (
+                    <li key={`${slip.id}-${event.matchId}-${event.selection}`}>
+                      <Link href={`/partita/${event.matchId}`}>{event.label}</Link>
+                      {": "}
+                      {event.selection} · {event.probabilityLabel} · quota {event.quotaLabel}
+                    </li>
+                  ))}
+                </ol>
+              ) : (
+                <p className="empty">Nessun evento in questa fascia.</p>
+              )}
+              <p className="worth">
+                <strong>{slip.probabilityLabel}</strong> insieme · quota {slip.quotaLabel}. {slip.detail}
+              </p>
+            </article>
+          ))}
+        </div>
+      </section>
       {data.slips.map((slip) => (
         <section key={slip.matchday} className="block">
           <header className="block-head">
@@ -88,8 +117,8 @@ export function GiornataBoard() {
                   {group.match.scoreLabel ? ` · ${group.match.scoreLabel}` : ` · ${group.match.kickoffLabel}`}
                   {" · "}
                   {worthCount(group.picks) === 0
-                    ? "Nessuna di queste conviene finché la quota non regge il conto."
-                    : `${worthCount(group.picks)} da puntare con la quota scritta.`}
+                    ? "Nessuna di queste conviene sul prezzo letto."
+                    : `${worthCount(group.picks)} da puntare sul prezzo letto.`}
                 </p>
                 <div className="slip">
                   {group.picks.map((pick, index) => (

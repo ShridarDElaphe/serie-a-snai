@@ -107,7 +107,7 @@ export function MatchBoard({ id }: { id: string }) {
       <section className="block">
         <h2>Quote di {match.homeName}–{match.awayName}</h2>
         <p className="hint">
-          Tutte le singole e le doppie di questa partita stanno qui, una sotto l’altra. La quota SNAI non è nel flusso: scrivila sul campo. Se rende pochi centesimi, non conviene.
+          Tutte le singole e le doppie di questa partita stanno qui, una sotto l’altra. La quota è quella letta dalla fonte. Se manca è dato assente, e se rende pochi centesimi non conviene.
         </p>
         {sortPicks(data.markets.flatMap((market) => market.picks)).length ? (
           <div className="slip">

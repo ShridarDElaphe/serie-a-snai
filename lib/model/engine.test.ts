@@ -40,6 +40,8 @@ function baseInput(overrides: Partial<DecideInput>): DecideInput {
     news: [],
     now: Date.parse("2026-10-28T12:00:00Z"),
     allowSquad: true,
+    odds: null,
+    oddsNote: "",
     ...overrides,
   };
 }

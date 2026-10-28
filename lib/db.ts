@@ -154,6 +154,30 @@ CREATE TABLE IF NOT EXISTS proposals (
 );
 CREATE INDEX IF NOT EXISTS proposals_match ON proposals(match_id, origin);
 CREATE INDEX IF NOT EXISTS matches_kickoff ON matches(kickoff);
+CREATE TABLE IF NOT EXISTS match_odds (
+  match_id TEXT PRIMARY KEY,
+  bookmaker TEXT NOT NULL,
+  source TEXT NOT NULL,
+  read_at TEXT NOT NULL,
+  q1 REAL,
+  qx REAL,
+  q2 REAL,
+  total_line REAL,
+  over_q REAL,
+  under_q REAL
+);
+CREATE TABLE IF NOT EXISTS match_method (
+  match_id TEXT PRIMARY KEY,
+  market_1 REAL,
+  market_x REAL,
+  market_2 REAL,
+  model_1 REAL,
+  model_x REAL,
+  model_2 REAL,
+  weight REAL,
+  excluded_reason TEXT,
+  updated_at TEXT NOT NULL
+);
 `;
 
 function dataDir(): string {
@@ -170,6 +194,9 @@ export function getDb(): Db {
   db.exec("PRAGMA journal_mode = WAL;");
   db.exec("PRAGMA busy_timeout = 5000;");
   db.exec(SCHEMA);
+  const columns = db.prepare("PRAGMA table_info(proposals)").all() as { name: string }[];
+  if (!columns.some((column) => column.name === "quota")) db.exec("ALTER TABLE proposals ADD COLUMN quota REAL");
+  if (!columns.some((column) => column.name === "quota_book")) db.exec("ALTER TABLE proposals ADD COLUMN quota_book TEXT");
   globalDb.__margineDb = db;
   return db;
 }
@@ -215,6 +242,8 @@ export function wipeDatabase() {
   const db = getDb();
   db.exec(`
     DELETE FROM proposals;
+    DELETE FROM match_method;
+    DELETE FROM match_odds;
     DELETE FROM assessments;
     DELETE FROM news_teams;
     DELETE FROM news;

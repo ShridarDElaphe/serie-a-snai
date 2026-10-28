@@ -1,6 +1,6 @@
 import type { PickView } from "@/lib/view";
 
-const MARKET_ORDER = ["doppia_chance", "multigol", "marcatore", "ammonizioni", "combo"];
+const MARKET_ORDER = ["segno", "under_over", "doppia_chance", "multigol", "marcatore", "ammonizioni", "combo"];
 
 /** Singole prima, doppie dopo. Dentro lo stesso mercato, la probabilità più alta sta sopra. */
 export function sortPicks(picks: PickView[]): PickView[] {
