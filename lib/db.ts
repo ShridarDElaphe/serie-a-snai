@@ -164,7 +164,8 @@ CREATE TABLE IF NOT EXISTS match_odds (
   q2 REAL,
   total_line REAL,
   over_q REAL,
-  under_q REAL
+  under_q REAL,
+  lines_json TEXT
 );
 CREATE TABLE IF NOT EXISTS match_method (
   match_id TEXT PRIMARY KEY,
@@ -197,6 +198,8 @@ export function getDb(): Db {
   const columns = db.prepare("PRAGMA table_info(proposals)").all() as { name: string }[];
   if (!columns.some((column) => column.name === "quota")) db.exec("ALTER TABLE proposals ADD COLUMN quota REAL");
   if (!columns.some((column) => column.name === "quota_book")) db.exec("ALTER TABLE proposals ADD COLUMN quota_book TEXT");
+  const oddsColumns = db.prepare("PRAGMA table_info(match_odds)").all() as { name: string }[];
+  if (!oddsColumns.some((column) => column.name === "lines_json")) db.exec("ALTER TABLE match_odds ADD COLUMN lines_json TEXT");
   globalDb.__margineDb = db;
   return db;
 }

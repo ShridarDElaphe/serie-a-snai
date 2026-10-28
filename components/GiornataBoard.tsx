@@ -87,6 +87,7 @@ export function GiornataBoard() {
                       <Link href={`/partita/${event.matchId}`}>{event.label}</Link>
                       {": "}
                       {event.selection} · {event.probabilityLabel} · quota {event.quotaLabel}
+                      {event.bookLabel ? ` ${event.bookLabel}` : ""}
                     </li>
                   ))}
                 </ol>

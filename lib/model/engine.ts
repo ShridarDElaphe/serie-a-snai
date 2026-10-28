@@ -1,5 +1,6 @@
 import { comboOverlaps } from "../combo";
 import { formatKick, formatNum, formatPct, percent } from "../format";
+import { MODEL_TOTALS, publishedPrice } from "../price-key";
 import {
   blendGrid,
   capFactor,
@@ -399,22 +400,8 @@ function absenceScale(input: DecideInput): { home: number; away: number; note: s
   return { home, away, note: bits.join(" ") };
 }
 
-function priceOf(market: ProposalDraft["market"], selection: string, odds: BookPrice | null | undefined): number | null {
-  if (!odds) return null;
-  if (market === "segno") {
-    if (selection.startsWith("1 —")) return odds.home;
-    if (selection.startsWith("X —")) return odds.draw;
-    if (selection.startsWith("2 —")) return odds.away;
-  }
-  if (market === "under_over" && odds.totalLine != null) {
-    const line = selection.match(/(\d+),(\d)/);
-    if (!line) return null;
-    const value = Number(`${line[1]}.${line[2]}`);
-    if (Math.abs(value - odds.totalLine) > 0.01) return null;
-    if (selection.startsWith("Over")) return odds.over;
-    if (selection.startsWith("Under")) return odds.under;
-  }
-  return null;
+function priceOf(market: ProposalDraft["market"], selection: string, odds: BookPrice | null | undefined): { price: number; bookmaker: string } | null {
+  return publishedPrice(market, selection, odds);
 }
 
 function explainDraft(
@@ -450,11 +437,11 @@ function explainDraft(
 
 function decorate(result: DecideResult, input: DecideInput, homeRow: StandingRow | null, awayRow: StandingRow | null): DecideResult {
   result.proposals = result.proposals.map((draft) => {
-    const quota = priceOf(draft.market, draft.selection, input.odds);
+    const found = priceOf(draft.market, draft.selection, input.odds);
     const next: ProposalDraft = {
       ...draft,
-      quota,
-      quotaBook: quota != null ? input.odds?.bookmaker ?? null : null,
+      quota: found?.price ?? null,
+      quotaBook: found?.bookmaker ?? null,
     };
     const fascia = next.probability == null ? DATO_ASSENTE : fasciaOf(next.probability);
     next.signals = { ...next.signals, rischio: fascia, fonte_quota: next.quotaBook ?? DATO_ASSENTE };
@@ -813,28 +800,57 @@ function pricedDrafts(
       formAway,
     });
   }
-  if (odds.totalLine == null || odds.over == null || odds.under == null) return drafts;
-  const line = odds.totalLine;
-  const overPred = (home: number, away: number) => home + away > line;
-  const underPred = (home: number, away: number) => home + away < line;
-  const overP = grid ? gridJoint(grid, [overPred]) : scoreJoint(lambdaHome, lambdaAway, [overPred]);
-  const underP = grid ? gridJoint(grid, [underPred]) : scoreJoint(lambdaHome, lambdaAway, [underPred]);
-  const label = formatNum(line, 1);
+  const wanted: number[] = [...MODEL_TOTALS];
+  if (odds.totalLine != null && !wanted.some((line) => Math.abs(line - odds.totalLine!) < 0.01)) wanted.push(odds.totalLine);
+  for (const line of wanted) {
+    const overPred = (home: number, away: number) => home + away > line;
+    const underPred = (home: number, away: number) => home + away < line;
+    const overP = grid ? gridJoint(grid, [overPred]) : scoreJoint(lambdaHome, lambdaAway, [overPred]);
+    const underP = grid ? gridJoint(grid, [underPred]) : scoreJoint(lambdaHome, lambdaAway, [underPred]);
+    const label = formatNum(line, 1);
+    for (const side of [
+      { selection: `Over ${label}`, probability: overP },
+      { selection: `Under ${label}`, probability: underP },
+    ]) {
+      if (!publishedPrice("under_over", side.selection, odds)) continue;
+      const alta = percent(side.probability) >= THRESHOLDS.dcAltaPercent;
+      drafts.push({
+        market: "under_over",
+        selection: side.selection,
+        confidence: alta ? "alta" : "media",
+        sicura: false,
+        probability: side.probability,
+        sortKey: side.probability,
+        reason: `Linea ${label}. La quota è quella pubblicata su questa linea, non sulle altre e non un prezzo equo calcolato come 1/probabilità.`,
+        safetyNote: safetyNote(side.probability, alta),
+        signals: { probabilita: percent(side.probability), linea: label },
+        formHome,
+        formAway,
+      });
+    }
+  }
+  const golP = grid
+    ? gridJoint(grid, [(home, away) => home > 0 && away > 0])
+    : scoreJoint(lambdaHome, lambdaAway, [(home, away) => home > 0 && away > 0]);
+  const noGolP = grid
+    ? gridJoint(grid, [(home, away) => home === 0 || away === 0])
+    : scoreJoint(lambdaHome, lambdaAway, [(home, away) => home === 0 || away === 0]);
   for (const side of [
-    { selection: `Over ${label}`, probability: overP },
-    { selection: `Under ${label}`, probability: underP },
+    { selection: "Gol — entrambe a segno", probability: golP },
+    { selection: "No gol — almeno una non segna", probability: noGolP },
   ]) {
+    if (!publishedPrice("gol", side.selection, odds)) continue;
     const alta = percent(side.probability) >= THRESHOLDS.dcAltaPercent;
     drafts.push({
-      market: "under_over",
+      market: "gol",
       selection: side.selection,
       confidence: alta ? "alta" : "media",
       sicura: false,
       probability: side.probability,
       sortKey: side.probability,
-      reason: `Linea ${label} pubblicata insieme al segno. La quota è del bookmaker su questa linea, non sulle altre (1,5 o 3,5 se non sono nel flusso).`,
+      reason: "Gol/no gol. La quota è quella pubblicata su GG o NG, non un prezzo equo e non una doppia chance travestita.",
       safetyNote: safetyNote(side.probability, alta),
-      signals: { probabilita: percent(side.probability), linea: label },
+      signals: { probabilita: percent(side.probability) },
       formHome,
       formAway,
     });
@@ -916,7 +932,7 @@ function comboDrafts(
         sicura: false,
         probability: joint,
         sortKey: joint,
-        reason: `Doppia su ${input.homeName}–${input.awayName}. La probabilità è quella dei punteggi che soddisfano entrambe le gambe, non il prodotto di due eventi staccati. ${left.token} da sola ${formatPct(left.marginal)}, ${right.token} da sola ${formatPct(right.marginal)}, insieme ${formatPct(joint)}. La quota della doppia non è pubblicata: resta ${DATO_ASSENTE}, non un prodotto delle due quote.`,
+        reason: `Doppia su ${input.homeName}–${input.awayName}. La probabilità è quella dei punteggi che soddisfano entrambe le gambe, non il prodotto di due eventi staccati. ${left.token} da sola ${formatPct(left.marginal)}, ${right.token} da sola ${formatPct(right.marginal)}, insieme ${formatPct(joint)}. La quota, se c'è, è quella della combinazione pubblicata. Non è il prodotto delle due quote.`,
         safetyNote: safetyNote(joint, alta),
         signals: {
           gamba1: left.token,

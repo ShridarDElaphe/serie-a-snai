@@ -1,4 +1,4 @@
-export type Market = "segno" | "doppia_chance" | "under_over" | "multigol" | "marcatore" | "ammonizioni" | "combo";
+export type Market = "segno" | "doppia_chance" | "under_over" | "gol" | "multigol" | "marcatore" | "ammonizioni" | "combo";
 export type Confidence = "alta" | "media";
 export type Origin = "live" | "ricostruzione";
 export type Outcome = "pending" | "hit" | "miss" | "non_verificabile" | "void";
@@ -120,6 +120,12 @@ export type DecideInput = {
   oddsNote: string;
 };
 
+/** Un prezzo letto su una riga precisa. Il book è quello della pagina, non SNAI. */
+export type PriceLine = {
+  price: number;
+  bookmaker: string;
+};
+
 export type BookPrice = {
   matchId: string;
   bookmaker: string;
@@ -131,6 +137,8 @@ export type BookPrice = {
   totalLine: number | null;
   over: number | null;
   under: number | null;
+  /** Doppia chance, gol/no gol, altre linee e doppie. Solo se la pagina mostra quel numero. */
+  lines?: Record<string, PriceLine>;
 };
 
 export type FusionState = {

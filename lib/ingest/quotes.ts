@@ -119,13 +119,19 @@ export async function probeQuoteSources(force = false): Promise<string[]> {
   const cached = metaGet("quote_probe");
   if (!force && cached && at && Date.now() - Date.parse(at) < 6 * 3_600_000) {
     try {
-      return JSON.parse(cached) as string[];
+      const notes = JSON.parse(cached) as string[];
+      if (notes.some((note) => note.includes("Betflag"))) return notes;
     } catch {
       /* ricalcola */
     }
   }
   const notes = await Promise.all(PROBES.map((probe) => one(probe)));
-  notes.unshift("Quote usate, se presenti: DraftKings nel tabellone ESPN. Non sono quote SNAI.");
+  notes.unshift(
+    "Quote usate, se presenti: DraftKings nel tabellone ESPN per il segno 1X2 e un totale. Doppia chance, gol/no gol, altre linee under/over, multigol e doppie da Betflag se la pagina le mostra. Non sono quote SNAI.",
+  );
+  notes.push(
+    "SNAI e Sisal: timeout, nessun listino. Goldbet, Lottomatica, Planetwin, William Hill, Stanleybet, Betway, Netbet e Betano: HTTP 403. Sofascore e Oddspedia: blocco. Non usati come numero.",
+  );
   metaSet("quote_probe_at", new Date().toISOString());
   metaSet("quote_probe", JSON.stringify(notes));
   return notes;
@@ -143,5 +149,5 @@ export function cachedQuoteNotes(): string[] {
 }
 
 export function quoteNoteSentence(): string {
-  return "The Odds API, OddsPapi, API-Football e football-data.org senza chiave, e le pagine di pronostici senza un campo quota, restano dato assente. Non invento il numero.";
+  return "Se questa riga non è nel listino, il numero è dato assente. The Odds API, OddsPapi, API-Football e football-data.org sono senza chiave. Eurobet, Goldbet, SNAI, Sisal, Sofascore e Oddspedia non hanno restituito un listino. Non invento il numero e non lo ricavo da altre quote.";
 }

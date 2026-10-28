@@ -33,7 +33,7 @@ export type SchedinaView = {
   id: "prudente" | "equilibrata" | "coraggiosa";
   title: string;
   note: string;
-  events: { matchId: string; label: string; selection: string; probabilityLabel: string; quotaLabel: string }[];
+  events: { matchId: string; label: string; selection: string; probabilityLabel: string; quotaLabel: string; bookLabel: string | null }[];
   probabilityLabel: string;
   quotaLabel: string;
   headline: string;

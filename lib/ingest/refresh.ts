@@ -10,6 +10,7 @@ import type {
   FinishedMatch,
   LineupPlayer,
   PlayerSeason,
+  PriceLine,
   ProposalDraft,
   SourceState,
   StandingRow,
@@ -25,6 +26,7 @@ import {
   type ParsedMatch,
 } from "./espn";
 import { probeFootballData } from "./football-data";
+import { loadBetflagPrices, romeDay, sameTeams } from "./betflag";
 import { cachedQuoteNotes, probeQuoteSources, quoteNoteSentence } from "./quotes";
 import { fetchJson, pool } from "./http";
 import { attachTeams, FEEDS, readFeed } from "./news";
@@ -680,6 +682,21 @@ function inputFor(match: MatchRow, live: boolean): DecideInput {
   };
 }
 
+function parseLines(raw: string | null): Record<string, PriceLine> {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw) as Record<string, { price?: unknown; bookmaker?: unknown }>;
+    const lines: Record<string, PriceLine> = {};
+    for (const [key, value] of Object.entries(parsed)) {
+      if (!value || typeof value.price !== "number" || !(value.price > 1) || typeof value.bookmaker !== "string") continue;
+      lines[key] = { price: value.price, bookmaker: value.bookmaker };
+    }
+    return lines;
+  } catch {
+    return {};
+  }
+}
+
 function oddsFor(matchId: string): BookPrice | null {
   const row = get<{
     bookmaker: string;
@@ -691,8 +708,9 @@ function oddsFor(matchId: string): BookPrice | null {
     total_line: number | null;
     over_q: number | null;
     under_q: number | null;
+    lines_json: string | null;
   }>(
-    "SELECT bookmaker, source, read_at, q1, qx, q2, total_line, over_q, under_q FROM match_odds WHERE match_id = ?",
+    "SELECT bookmaker, source, read_at, q1, qx, q2, total_line, over_q, under_q, lines_json FROM match_odds WHERE match_id = ?",
     matchId,
   );
   if (!row) return null;
@@ -707,7 +725,84 @@ function oddsFor(matchId: string): BookPrice | null {
     totalLine: row.total_line,
     over: row.over_q,
     under: row.under_q,
+    lines: parseLines(row.lines_json),
   };
+}
+
+function storeBetflagLines(matchId: string, event: {
+  lines: Record<string, PriceLine>;
+  homePrice: number | null;
+  drawPrice: number | null;
+  awayPrice: number | null;
+  totalLine: number | null;
+  over: number | null;
+  under: number | null;
+}) {
+  const readAt = new Date().toISOString();
+  const lines = JSON.stringify(event.lines);
+  run(
+    `INSERT INTO match_odds(match_id, bookmaker, source, read_at, q1, qx, q2, total_line, over_q, under_q, lines_json)
+     VALUES(?, 'Betflag', 'sportservice.betflag.it', ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(match_id) DO UPDATE SET
+       lines_json = excluded.lines_json,
+       q1 = COALESCE(match_odds.q1, excluded.q1),
+       qx = COALESCE(match_odds.qx, excluded.qx),
+       q2 = COALESCE(match_odds.q2, excluded.q2),
+       total_line = COALESCE(match_odds.total_line, excluded.total_line),
+       over_q = COALESCE(match_odds.over_q, excluded.over_q),
+       under_q = COALESCE(match_odds.under_q, excluded.under_q),
+       bookmaker = CASE WHEN match_odds.q1 IS NULL THEN excluded.bookmaker ELSE match_odds.bookmaker END,
+       source = CASE WHEN match_odds.q1 IS NULL THEN excluded.source ELSE match_odds.source END`,
+    matchId,
+    readAt,
+    event.homePrice,
+    event.drawPrice,
+    event.awayPrice,
+    event.totalLine,
+    event.over,
+    event.under,
+    lines,
+  );
+}
+
+function rememberBetflagNote(note: string) {
+  const current = readSource();
+  saveSource({ odds: [...(current.odds ?? []).filter((line) => !line.startsWith("Betflag")), note] });
+}
+
+async function syncBetflag() {
+  const at = metaGet("betflag_at");
+  const cachedNote = metaGet("betflag_note");
+  if (at && cachedNote && Date.now() - Date.parse(at) < 15 * 60_000) {
+    rememberBetflagNote(cachedNote);
+    return;
+  }
+  try {
+    const loaded = await loadBetflagPrices();
+    const matches = all<{ id: string; home_name: string; away_name: string; kickoff: string; status: string }>(
+      "SELECT id, home_name, away_name, kickoff, status FROM matches WHERE status = 'non iniziata'",
+    );
+    let linked = 0;
+    for (const event of loaded.events) {
+      const match = matches.find(
+        (row) => sameTeams(row.home_name, row.away_name, event.home, event.away) && romeDay(row.kickoff) === event.day,
+      );
+      if (!match) continue;
+      storeBetflagLines(match.id, event);
+      linked += 1;
+    }
+    metaSet("betflag_at", new Date().toISOString());
+    const note = `${loaded.note} Collegate alle partite ESPN: ${linked}.`;
+    metaSet("betflag_note", note);
+    rememberBetflagNote(note);
+    console.log(`[margine] ${note}`);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "errore";
+    const note = `Betflag sportservice.betflag.it: non raggiungibile (${message}). Doppia chance, multigol, gol/no gol e doppie senza un numero già letto restano dato assente.`;
+    metaSet("betflag_note", note);
+    rememberBetflagNote(note);
+    console.error("[margine] betflag", message);
+  }
 }
 
 function saveProposals(matchId: string, origin: "live" | "ricostruzione", drafts: ProposalDraft[], freeze: boolean) {
@@ -892,6 +987,12 @@ function judge(proposal: {
     const hit = proposal.selection.startsWith("Over") ? goals > threshold : goals < threshold;
     return { outcome: hit ? "hit" : "miss", note: `Gol totali ${goals}` };
   }
+  if (proposal.market === "gol") {
+    const both = home > 0 && away > 0;
+    const hit = proposal.selection.startsWith("No gol") ? !both : proposal.selection.startsWith("Gol") ? both : null;
+    if (hit == null) return { outcome: "non_verificabile", note: "Gol/no gol illeggibile" };
+    return { outcome: hit ? "hit" : "miss", note: `Risultato ${home}-${away}` };
+  }
   if (proposal.market === "doppia_chance") {
     const hit =
       (proposal.selection.startsWith("1X") && result !== "2") ||
@@ -972,6 +1073,8 @@ export async function refresh(mode: Mode) {
       saveSource({ phase: "Tabellini e formazioni" });
       await syncSummaries(mode);
     }
+    saveSource({ phase: "Quote Betflag" });
+    if ((get<{ n: number }>("SELECT COUNT(*) AS n FROM matches")?.n ?? 0) > 0) await syncBetflag();
     saveSource({ phase: "Proposte" });
     recompute();
     settle();

@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { comboOverlaps } from "../combo";
+import { dcKey } from "../price-key";
+import { judgeStake } from "../worth";
 import { decide, pickBand, scoreProbs } from "./engine";
 import type { DecideInput, FinishedMatch, PlayerSeason } from "../types";
 
@@ -178,5 +180,52 @@ assert.equal(goalPick?.sicura, false);
 const thin = decide(baseInput({ prior: [match(1, "H", "A", 1, 0)] }));
 assert.equal(thin.proposals.some((pick) => pick.market === "doppia_chance"), false);
 assert.ok(thin.notes.some((note) => note.includes("dato assente")));
+
+const awayPrior: FinishedMatch[] = [];
+for (let i = 0; i < 6; i += 1) awayPrior.push(match(i, "H", "X", 0, 2));
+for (let i = 0; i < 4; i += 1) awayPrior.push(match(20 + i, "Y", "A", 0, 2));
+const venezia = decide(
+  baseInput({
+    prior: awayPrior,
+    homeName: "Venezia",
+    awayName: "Inter",
+    odds: {
+      matchId: "401874773",
+      bookmaker: "DraftKings",
+      source: "ESPN scoreboard",
+      readAt: "2026-10-28T16:00:00Z",
+      home: 7,
+      draw: 5.5,
+      away: 1.35,
+      totalLine: 3.5,
+      over: 1.91,
+      under: 1.87,
+      lines: {
+        [dcKey("X2")]: { price: 1.08, bookmaker: "Betflag" },
+        [dcKey("12")]: { price: 1.14, bookmaker: "Betflag" },
+        [dcKey("1X")]: { price: 3.15, bookmaker: "Betflag" },
+      },
+    },
+  }),
+);
+const x2 = venezia.proposals.find((pick) => pick.market === "doppia_chance" && pick.selection.startsWith("X2"));
+assert.ok(x2, "X2 deve restare in elenco anche a 1,08");
+assert.equal(x2?.quota, 1.08);
+assert.equal(x2?.quotaBook, "Betflag");
+const tiny = judgeStake(x2?.probability ?? null, "1.08", x2?.confidence);
+assert.equal(tiny.verdict, "irrisorio");
+assert.equal(tiny.conviene, false);
+assert.equal(
+  venezia.proposals.filter((pick) => pick.market === "combo").every((pick) => pick.quota == null),
+  true,
+);
+const over35 = venezia.proposals.find((pick) => pick.selection === "Over 3,5");
+assert.equal(over35?.quota, 1.91);
+assert.equal(over35?.quotaBook, "DraftKings");
+assert.equal(venezia.proposals.some((pick) => pick.selection === "Over 2,5"), false);
+assert.equal(
+  venezia.proposals.some((pick) => /Multigol \d-\d \+ Under|Under [\d,]+ \+ Multigol/.test(pick.selection)),
+  false,
+);
 
 console.log("modello ok");

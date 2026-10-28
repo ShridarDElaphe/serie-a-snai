@@ -112,7 +112,7 @@ function banner(state: SourceState): string {
     return "Dati di esempio. Le fonti live non hanno risposto: risultati e proposte non sono reali.";
   }
   if (state.fixtures === "espn") {
-    return "Serie A 2026/27 letta da ESPN. La quota, se c’è, è DraftKings nel tabellone: non è SNAI. Se la fonte non ha il numero, resta dato assente.";
+    return "Serie A 2026/27 letta da ESPN. Il segno 1X2 e un totale, se ci sono, sono DraftKings. Doppia chance, gol/no gol, le altre linee e le doppie, se ci sono, sono Betflag. Non è SNAI. Se la pagina non mostra il numero, resta dato assente.";
   }
   if (state.fixtures === "football-data") return "Calendario letto da football-data.org. Le quote di quel servizio, senza chiave, restano dato assente.";
   return "In attesa delle partite.";
@@ -327,7 +327,7 @@ function readSchedine(matchday: number | null): SchedinaView[] {
       id: fascia.id,
       title: fascia.title,
       note: "Giornata corrente: dato assente.",
-      events: [],
+      events: [] as GiornataPayload["schedine"][number]["events"],
       probabilityLabel: DATO_ASSENTE,
       quotaLabel: DATO_ASSENTE,
       headline: "Schedina non costruita.",
@@ -361,6 +361,7 @@ function readSchedine(matchday: number | null): SchedinaView[] {
         selection: row.selection,
         probability: row.probability as number,
         quota: row.quota as number,
+        bookmaker: row.quota_book,
       }));
     return {
       match,
@@ -402,6 +403,7 @@ function readSchedine(matchday: number | null): SchedinaView[] {
         selection: event.selection,
         probabilityLabel: formatPct(event.probability),
         quotaLabel: formatNum(event.quota, 2),
+        bookLabel: event.bookmaker ?? null,
       })),
       probabilityLabel: slip.probability == null ? DATO_ASSENTE : formatPct(slip.probability),
       quotaLabel: slip.quota == null ? DATO_ASSENTE : formatNum(slip.quota, 2),
@@ -506,6 +508,7 @@ export function readPartita(id: string): MatchPayload {
     ["segno", "Segno"],
     ["under_over", "Under/Over"],
     ["doppia_chance", "Doppia chance"],
+    ["gol", "Gol/No gol"],
     ["multigol", "Multigol"],
     ["combo", "Doppia"],
     ["marcatore", "Marcatore"],
@@ -599,7 +602,7 @@ export function readPartita(id: string): MatchPayload {
 export function readStorico(): StoricoPayload {
   const state = source();
   const rows = all<ProposalRow>(`${PICK_SQL} ORDER BY m.kickoff DESC, p.sort_key DESC`).map(toPick);
-  const markets = ["segno", "under_over", "doppia_chance", "multigol", "combo", "marcatore", "ammonizioni"];
+  const markets = ["segno", "under_over", "doppia_chance", "gol", "multigol", "combo", "marcatore", "ammonizioni"];
   const rates = markets.map((market) => {
     const mine = rows.filter((row) => row.market === market);
     const hits = mine.filter((row) => row.outcome === "hit").length;

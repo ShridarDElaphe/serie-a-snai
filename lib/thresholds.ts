@@ -75,6 +75,7 @@ export const MARKET_LABEL: Record<string, string> = {
   ammonizioni: "Ammonizioni",
   segno: "Segno",
   under_over: "Under/Over",
+  gol: "Gol/No gol",
   combo: "Doppia",
 };
 

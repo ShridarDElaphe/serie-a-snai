@@ -186,6 +186,7 @@ export type PricedLeg = {
   selection: string;
   probability: number;
   quota: number;
+  bookmaker?: string | null;
 };
 
 export function bestLeg(legs: PricedLeg[], fascia: Fascia): PricedLeg | null {

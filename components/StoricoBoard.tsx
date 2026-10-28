@@ -10,6 +10,7 @@ const FILTERS = [
   { id: "segno", label: "Segno" },
   { id: "under_over", label: "Under/Over" },
   { id: "doppia_chance", label: "Doppia chance" },
+  { id: "gol", label: "Gol/No gol" },
   { id: "multigol", label: "Multigol" },
   { id: "combo", label: "Doppie" },
   { id: "marcatore", label: "Marcatori" },
